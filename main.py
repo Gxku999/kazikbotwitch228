@@ -18,7 +18,7 @@ def log(msg: str):
 
 # === ХЕЛПЕРЫ ===
 def text_response(message: str):
-    """Возвращает ответ в виде простого текста (без иероглифов \uXXXX)"""
+    # Возвращает ответ в виде простого текста (без иероглифов \uXXXX)
     return Response(message, content_type="text/plain; charset=utf-8")
 
 def load_balances():
