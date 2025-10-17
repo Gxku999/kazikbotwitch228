@@ -6,5 +6,6 @@
   "red": {
     "balance": 2500,
     "last_bonus": 0
-  }
+  },
+  "test": 1600
 }
