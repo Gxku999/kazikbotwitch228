@@ -1,129 +1,174 @@
-from flask import Flask, request
-import random
-import json
-import time
-import os
+from flask import Flask, request, jsonify
+import random, json, os, datetime, time
 
 app = Flask(__name__)
 
+# === Настройки ===
 DATA_FILE = "balances.json"
+STATS_FILE = "stats.json"
+BONUS_FILE = "bonuses.json"
+WATCH_FILE = "watchtime.json"
 
-# Загрузка балансов из файла
-if os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        balances = json.load(f)
-else:
-    balances = {}
+START_BALANCE = 1000
+DAILY_BONUS = 500
+WATCH_REWARD = 500
+WATCH_INTERVAL = 15 * 60  # 15 минут в секундах
 
-# Сохранение данных
-def save_data():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(balances, f, ensure_ascii=False, indent=2)
+# === Вспомогательные функции ===
+def load_json(file):
+    if not os.path.exists(file):
+        return {}
+    with open(file, "r") as f:
+        return json.load(f)
 
-# Инициализация пользователя
-def init_user(user):
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+balances = load_json(DATA_FILE)
+stats = load_json(STATS_FILE)
+bonuses = load_json(BONUS_FILE)
+watchtime = load_json(WATCH_FILE)
+
+
+def get_balance(user):
     if user not in balances:
-        balances[user] = {
-            "balance": 1000,
-            "wins": 0,
-            "losses": 0,
-            "last_bonus": 0
-        }
+        balances[user] = START_BALANCE
+        save_json(DATA_FILE, balances)
+    return balances[user]
 
-@app.route("/")
-def home():
-    return "Twitch Casino Bot работает!"
 
+def reward_watchtime(user):
+    """Начисляет награду за активность, если прошло >= 15 минут"""
+    now = time.time()
+    last_time = watchtime.get(user, 0)
+    if now - last_time >= WATCH_INTERVAL:
+        balances[user] = get_balance(user) + WATCH_REWARD
+        watchtime[user] = now
+        save_json(DATA_FILE, balances)
+        save_json(WATCH_FILE, watchtime)
+        return f"⏱ {user} получает {WATCH_REWARD} монет за активность на стриме! 🎁 Баланс: {balances[user]}"
+    return None
+
+
+# === Рулетка ===
 @app.route("/roll")
 def roll():
     user = request.args.get("user")
-    color = request.args.get("color", "").lower()
-    bet = request.args.get("bet", "")
+    color = (request.args.get("color") or "").lower()
+    bet = request.args.get("bet")
 
-    if not user:
-        return "Ошибка: не указано имя пользователя."
-    if not bet.isdigit():
-        return "Ставка должна быть числом!"
+    if not user or not color or not bet:
+        return jsonify({"message": "❌ Используй: !roll [red/black/green] [ставка]"}), 400
 
-    bet = int(bet)
-    init_user(user)
+    try:
+        bet = int(bet)
+    except ValueError:
+        return jsonify({"message": "❌ Ставка должна быть числом!"}), 400
 
-    balance = balances[user]["balance"]
+    balance = get_balance(user)
     if bet > balance:
-        return f"{user}, у тебя недостаточно монет! Баланс: {balance}"
+        return jsonify({"message": f"💸 Недостаточно монет! Баланс: {balance}"}), 400
 
-    if color not in ["red", "black", "green"]:
-        return "Можно ставить только на red, black или green."
+    # Проверка на награду за активность
+    reward_msg = reward_watchtime(user)
 
-    # Выпадающий цвет
+    balances[user] -= bet
+
     result = random.choices(["red", "black", "green"], weights=[48, 48, 4])[0]
+    multiplier = 14 if result == "green" else 2
 
-    if color == result:
-        multiplier = 14 if result == "green" else 2
-        win = bet * (multiplier - 1)
-        balances[user]["balance"] += win
-        balances[user]["wins"] += 1
-        msg = f"{user} ставит {bet} на {color}... Выпало {result}! Победа +{win}! Баланс: {balances[user]['balance']}"
+    if result == color:
+        win = bet * multiplier
+        balances[user] += win
+        stats.setdefault(user, {"wins": 0, "losses": 0})
+        stats[user]["wins"] += 1
+        msg = f"🎰 {user} ставит {bet} на {color}! Выпало {result} — 🤑 Победа! +{win - bet} монет | Баланс: {balances[user]}"
     else:
-        balances[user]["balance"] -= bet
-        balances[user]["losses"] += 1
-        msg = f"{user} ставит {bet} на {color}... Выпало {result}! Проигрыш -{bet}. Баланс: {balances[user]['balance']}"
+        stats.setdefault(user, {"wins": 0, "losses": 0})
+        stats[user]["losses"] += 1
+        msg = f"🎰 {user} ставит {bet} на {color}! Выпало {result} — ❌ Проигрыш | Баланс: {balances[user]}"
 
-    save_data()
-    return msg
+    save_json(DATA_FILE, balances)
+    save_json(STATS_FILE, stats)
 
+    if reward_msg:
+        msg += f"\n{reward_msg}"
+
+    return jsonify({"message": msg})
+
+
+# === Баланс ===
 @app.route("/balance")
 def balance():
     user = request.args.get("user")
     if not user:
-        return "Ошибка: не указано имя пользователя."
+        return jsonify({"message": "❌ Укажи имя пользователя!"}), 400
 
-    init_user(user)
-    data = balances[user]
-    return f"{user}, баланс: {data['balance']}. Побед: {data['wins']}, поражений: {data['losses']}."
+    reward_msg = reward_watchtime(user)
+    bal = get_balance(user)
+    msg = f"💰 Баланс {user}: {bal} монет"
+    if reward_msg:
+        msg += f"\n{reward_msg}"
+    return jsonify({"message": msg})
 
+
+# === Ежедневный бонус ===
 @app.route("/bonus")
 def bonus():
     user = request.args.get("user")
     if not user:
-        return "Ошибка: не указано имя пользователя."
+        return jsonify({"message": "❌ Укажи имя пользователя!"}), 400
 
-    init_user(user)
-    now = time.time()
-    last = balances[user]["last_bonus"]
+    today = datetime.date.today().isoformat()
+    last_claim = bonuses.get(user)
 
-    if now - last < 86400:  # 24 часа
-        remaining = int((86400 - (now - last)) / 3600)
-        return f"{user}, ты уже получал бонус сегодня! Попробуй снова через {remaining} ч."
-    else:
-        balances[user]["balance"] += 500
-        balances[user]["last_bonus"] = now
-        save_data()
-        return f"{user}, ты получил ежедневный бонус +500 монет! Баланс: {balances[user]['balance']}."
+    if last_claim == today:
+        return jsonify({"message": "🎁 Ты уже получал бонус сегодня! Возвращайся завтра!"})
 
+    bonuses[user] = today
+    balances[user] = get_balance(user) + DAILY_BONUS
+
+    save_json(BONUS_FILE, bonuses)
+    save_json(DATA_FILE, balances)
+
+    msg = f"🎁 {user} получает ежедневный бонус {DAILY_BONUS} монет! Баланс: {balances[user]}"
+    return jsonify({"message": msg})
+
+
+# === Топ игроков ===
 @app.route("/top")
 def top():
     if not balances:
-        return "Пока нет игроков."
+        return jsonify({"message": "😴 Ещё никто не играл!"})
 
-    top_players = sorted(balances.items(), key=lambda x: x[1]["balance"], reverse=True)[:5]
-    msg = "🏆 Топ игроков:\n"
-    for i, (name, data) in enumerate(top_players, start=1):
-        msg += f"{i}. {name} — {data['balance']}\n"
-    return msg.strip()
+    top_players = sorted(balances.items(), key=lambda x: x[1], reverse=True)[:5]
+    msg = "🏆 Топ игроков:\n" + "\n".join([f"{i+1}. {u} — {b} монет" for i, (u, b) in enumerate(top_players)])
+    return jsonify({"message": msg})
 
+
+# === Статистика ===
 @app.route("/stats")
-def stats():
+def user_stats():
     user = request.args.get("user")
     if not user:
-        return "Ошибка: не указано имя пользователя."
+        return jsonify({"message": "❌ Укажи имя пользователя!"}), 400
 
-    init_user(user)
-    w = balances[user]["wins"]
-    l = balances[user]["losses"]
-    total = w + l
-    winrate = 0 if total == 0 else round((w / total) * 100, 1)
-    return f"{user}: побед — {w}, поражений — {l} (винрейт {winrate}%)."
+    reward_msg = reward_watchtime(user)
+    s = stats.get(user, {"wins": 0, "losses": 0})
+    total = s["wins"] + s["losses"]
+    winrate = (s["wins"] / total * 100) if total > 0 else 0
+    msg = f"📊 Статистика {user}: Побед — {s['wins']}, Поражений — {s['losses']} (WinRate: {winrate:.1f}%)"
+    if reward_msg:
+        msg += f"\n{reward_msg}"
+    return jsonify({"message": msg})
+
+
+# === Главная ===
+@app.route("/")
+def home():
+    return "🎰 Twitch Casino Bot — активность, бонусы и рулетка работают!"
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=10000)
