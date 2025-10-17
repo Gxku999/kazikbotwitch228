@@ -14,45 +14,22 @@ BONUS_AMOUNT = 500
 BONUS_INTERVAL = 15 * 60  # 15 минут
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")  # пример: gxku999/kazikbot
+GITHUB_REPO = os.getenv("GITHUB_REPO")
 GITHUB_USER = os.getenv("GITHUB_USER")
+
+ADMINS = ["gxku999"]  # 👑 Только эти пользователи могут выдавать/забирать баланс
 
 LAST_PUSH = 0
 PUSH_INTERVAL = 300  # 5 минут
 
-def save_balances():
-    global LAST_PUSH
-    try:
-        with open(LOCAL_FILE, "w", encoding="utf-8") as f:
-            json.dump(balances, f, ensure_ascii=False, indent=2)
-        log(f"💾 Сохранено {LOCAL_FILE}")
-
-        now = time.time()
-        if now - LAST_PUSH >= PUSH_INTERVAL:
-            subprocess.run(["git", "add", LOCAL_FILE])
-            subprocess.run(["git", "commit", "-m", "update balances.json"], check=False)
-            subprocess.run([
-                "git", "push",
-                f"https://{os.getenv('GITHUB_USER')}:{os.getenv('GITHUB_TOKEN')}@github.com/{os.getenv('GITHUB_REPO')}.git",
-                "HEAD:main"
-            ], check=False)
-            LAST_PUSH = now
-            log("✅ balances.json синхронизирован с GitHub.")
-        else:
-            log("⏳ Пропуск пуша (слишком рано).")
-
-    except Exception as e:
-        log(f"⚠️ Ошибка сохранения файла: {e}")
-
-
-
-# === Вспомогательные функции ===
+# === Логирование ===
 def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 def text_response(message):
     return Response(message, content_type="text/plain; charset=utf-8")
 
+# === Работа с файлами ===
 def load_balances():
     if os.path.exists(LOCAL_FILE):
         try:
@@ -90,14 +67,22 @@ def push_to_github():
 balances = load_balances()
 log("✅ Бот запущен, баланс загружен.")
 
-# === Логика ===
+# === Вспомогательные ===
 def ensure_user(user):
     user = user.lower()
     if user not in balances:
-        balances[user] = {"balance": DEFAULT_BALANCE, "last_bonus": 0}
+        balances[user] = {
+            "balance": DEFAULT_BALANCE,
+            "last_bonus": 0,
+            "stats": {"wins": 0, "losses": 0, "earned": 0, "lost": 0}
+        }
         save_balances()
     return user
 
+def is_admin(user):
+    return user.lower() in [a.lower() for a in ADMINS]
+
+# === Команды ===
 @app.route("/")
 def home():
     return text_response("✅ Twitch Casino Bot работает!")
@@ -129,6 +114,8 @@ def roll():
 
     u = ensure_user(user)
     bal = balances[u]["balance"]
+    stats = balances[u].setdefault("stats", {"wins": 0, "losses": 0, "earned": 0, "lost": 0})
+
     if bal < bet:
         return text_response(f"❌ Недостаточно средств! Баланс: {bal}")
 
@@ -138,10 +125,15 @@ def roll():
 
     if color == outcome:
         win = bet * (14 if color == "green" else 2)
-        balances[u]["balance"] += win
-        result = f"✅ Победа! +{win - bet} монет"
+        profit = win - bet
+        balances[u]["balance"] += profit
+        stats["wins"] += 1
+        stats["earned"] += profit
+        result = f"✅ Победа! +{profit} монет"
     else:
         balances[u]["balance"] -= bet
+        stats["losses"] += 1
+        stats["lost"] += bet
         result = f"❌ Проигрыш -{bet} монет"
 
     save_balances()
@@ -175,7 +167,68 @@ def top():
     lines = [f"{i+1}. {u} — {d['balance']} монет" for i, (u, d) in enumerate(sorted_users[:10])]
     return text_response("🏆 Топ игроков:\n" + "\n".join(lines))
 
+@app.route("/stats")
+def stats():
+    user = request.args.get("user", "").strip().lower()
+    if not user:
+        return text_response("❌ Укажи имя (?user=...)")
+    u = ensure_user(user)
+    s = balances[u].get("stats", {"wins": 0, "losses": 0, "earned": 0, "lost": 0})
+    games = s["wins"] + s["losses"]
+    net = s["earned"] - s["lost"]
+    return text_response(
+        f"📊 Статистика {user}:\n"
+        f"🎮 Игр сыграно: {games}\n"
+        f"✅ Побед: {s['wins']}\n"
+        f"❌ Поражений: {s['losses']}\n"
+        f"💰 Выиграно: {s['earned']}\n"
+        f"💸 Проиграно: {s['lost']}\n"
+        f"📈 Чистая прибыль: {net}"
+    )
+
+@app.route("/give")
+def give():
+    admin = request.args.get("admin", "").strip().lower()
+    user = request.args.get("user", "").strip().lower()
+    amount = request.args.get("amount", "").strip()
+
+    if not is_admin(admin):
+        return text_response("⛔ У тебя нет прав для этой команды!")
+
+    if not user or not amount:
+        return text_response("❌ Формат: /give?admin=ник&user=ник&amount=100")
+
+    try:
+        amt = int(amount)
+    except:
+        return text_response("❌ Сумма должна быть числом")
+
+    u = ensure_user(user)
+    balances[u]["balance"] += amt
+    save_balances()
+    return text_response(f"💸 {admin} выдал {amt} монет игроку {user}. Баланс: {balances[u]['balance']}")
+
+@app.route("/take")
+def take():
+    admin = request.args.get("admin", "").strip().lower()
+    user = request.args.get("user", "").strip().lower()
+    amount = request.args.get("amount", "").strip()
+
+    if not is_admin(admin):
+        return text_response("⛔ У тебя нет прав для этой команды!")
+
+    if not user or not amount:
+        return text_response("❌ Формат: /take?admin=ник&user=ник&amount=100")
+
+    try:
+        amt = int(amount)
+    except:
+        return text_response("❌ Сумма должна быть числом")
+
+    u = ensure_user(user)
+    balances[u]["balance"] = max(0, balances[u]["balance"] - amt)
+    save_balances()
+    return text_response(f"💀 {admin} изъял {amt} монет у {user}. Баланс: {balances[u]['balance']}")
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
