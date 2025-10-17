@@ -2,23 +2,26 @@ import json
 import random
 import time
 import os
+import subprocess
 from flask import Flask, request, Response
 
 app = Flask(__name__)
 
-# === НАСТРОЙКИ ===
+# === Настройки ===
 LOCAL_FILE = "balances.json"
 DEFAULT_BALANCE = 1500
 BONUS_AMOUNT = 500
 BONUS_INTERVAL = 15 * 60  # 15 минут
 
-# === ЛОГИ ===
-def log(msg: str):
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")  # пример: gxku999/kazikbot
+GITHUB_USER = os.getenv("GITHUB_USER")
+
+# === Вспомогательные функции ===
+def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
-# === ХЕЛПЕРЫ ===
-def text_response(message: str):
-    # Возвращает ответ в виде простого текста (без иероглифов \uXXXX)
+def text_response(message):
     return Response(message, content_type="text/plain; charset=utf-8")
 
 def load_balances():
@@ -27,23 +30,39 @@ def load_balances():
             with open(LOCAL_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            log(f"⚠️ Ошибка чтения файла {LOCAL_FILE}: {e}")
+            log(f"⚠ Ошибка чтения {LOCAL_FILE}: {e}")
     return {}
 
 def save_balances():
     try:
         with open(LOCAL_FILE, "w", encoding="utf-8") as f:
             json.dump(balances, f, ensure_ascii=False, indent=2)
-        log(f"💾 Сохранено {LOCAL_FILE} ({os.path.getsize(LOCAL_FILE)} байт)")
+        log(f"💾 balances.json сохранён локально.")
+        push_to_github()
     except Exception as e:
-        log(f"⚠️ Ошибка сохранения файла: {e}")
+        log(f"⚠ Ошибка при сохранении: {e}")
 
-# === ЗАГРУЗКА ===
+def push_to_github():
+    if not (GITHUB_TOKEN and GITHUB_REPO and GITHUB_USER):
+        log("⚠ Нет данных GitHub, пропуск синхронизации.")
+        return
+    try:
+        repo_url = f"https://{GITHUB_USER}:{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+        subprocess.run(["git", "config", "--global", "user.email", "bot@render.local"])
+        subprocess.run(["git", "config", "--global", "user.name", "Render Bot"])
+        subprocess.run(["git", "add", LOCAL_FILE])
+        subprocess.run(["git", "commit", "-m", f"update balances.json {time.strftime('%H:%M:%S')}"], check=False)
+        subprocess.run(["git", "push", repo_url, "HEAD:main"], check=False)
+        log("✅ balances.json синхронизирован с GitHub.")
+    except Exception as e:
+        log(f"⚠ Ошибка при push в GitHub: {e}")
+
+# === Загрузка ===
 balances = load_balances()
 log("✅ Бот запущен, баланс загружен.")
 
-# === ФУНКЦИИ ===
-def ensure_user(user: str):
+# === Логика ===
+def ensure_user(user):
     user = user.lower()
     if user not in balances:
         balances[user] = {"balance": DEFAULT_BALANCE, "last_bonus": 0}
@@ -59,7 +78,6 @@ def balance():
     user = request.args.get("user", "").strip().lower()
     if not user:
         return text_response("❌ Укажи имя пользователя (?user=...)")
-
     u = ensure_user(user)
     bal = balances[u]["balance"]
     return text_response(f"💰 Баланс {user}: {bal} монет")
@@ -69,7 +87,6 @@ def roll():
     user = request.args.get("user", "").strip().lower()
     color = request.args.get("color", "").strip().lower()
     bet_str = request.args.get("bet", "").strip()
-
     if not user or not color or not bet_str:
         return text_response("❌ Формат: /roll?user=ник&color=red|black|green&bet=100")
 
@@ -82,10 +99,9 @@ def roll():
         return text_response("❌ Минимальная ставка — 1 монета")
 
     u = ensure_user(user)
-    balance = balances[u]["balance"]
-
-    if balance < bet:
-        return text_response(f"❌ Недостаточно средств! Баланс: {balance}")
+    bal = balances[u]["balance"]
+    if bal < bet:
+        return text_response(f"❌ Недостаточно средств! Баланс: {bal}")
 
     outcome = random.choices(["red", "black", "green"], weights=[47, 47, 6])[0]
     emoji = {"red": "🟥", "black": "⬛", "green": "🟩"}[outcome]
@@ -116,20 +132,18 @@ def bonus():
         balances[u]["last_bonus"] = now
         balances[u]["balance"] += BONUS_AMOUNT
         save_balances()
-        return text_response(f"🎁 {user} получает {BONUS_AMOUNT} монет за активность! Баланс: {balances[u]['balance']}")
+        return text_response(f"🎁 {user} получает {BONUS_AMOUNT} монет! Баланс: {balances[u]['balance']}")
     else:
         remain = int(BONUS_INTERVAL - (now - last))
         m, s = divmod(remain, 60)
-        return text_response(f"⏳ {user}, бонус доступен через {m}м {s}с")
+        return text_response(f"⏳ {user}, бонус через {m}м {s}с")
 
 @app.route("/top")
 def top():
     if not balances:
         return text_response("🏆 Пока нет игроков")
-
     sorted_users = sorted(balances.items(), key=lambda x: x[1]["balance"], reverse=True)
-    top10 = sorted_users[:10]
-    lines = [f"{i+1}. {u} — {d['balance']} монет" for i, (u, d) in enumerate(top10)]
+    lines = [f"{i+1}. {u} — {d['balance']} монет" for i, (u, d) in enumerate(sorted_users[:10])]
     return text_response("🏆 Топ игроков:\n" + "\n".join(lines))
 
 if __name__ == "__main__":
