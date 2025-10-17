@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, Response
 import json, random, time, os
 
 app = Flask(__name__)
@@ -13,9 +13,9 @@ WATCH_REWARD = 500
 WATCH_INTERVAL = 15 * 60  # 15 минут
 DAILY_BONUS = 500
 
-ADMINS = ["gxku999"]  # твой ник админа в нижнем регистре
+ADMINS = ["gxku999"]  # твой Twitch ник в нижнем регистре
 
-# =============== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===============
+# ================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==================
 
 def load_json(filename):
     if not os.path.exists(filename):
@@ -86,13 +86,15 @@ def reward_on_command(user_raw):
     reward_msg = reward_watchtime(user_raw)
     return reward_msg
 
-def text_response(msg):
-    return jsonify({"message": msg})
+def text_response(msg: str):
+    """Возвращает нормальный JSON с эмодзи и кириллицей"""
+    return Response(json.dumps({"message": msg}, ensure_ascii=False),
+                    mimetype="application/json; charset=utf-8")
 
-# =============== РУЛЕТКА 🎰 ===============
+# ================== РУЛЕТКА 🎰 ==================
 
-@app.route("/roll")
-def roll():
+@app.route("/roulette")
+def roulette():
     user_raw = request.args.get("user") or ""
     reward_msg = reward_on_command(user_raw)
 
@@ -111,8 +113,8 @@ def roll():
         return text_response("❌ Недостаточно монет!")
 
     result = random.choices(["red", "black", "green"], weights=[48, 48, 4])[0]
-
     color_emoji = {"red": "🟥", "black": "⬛", "green": "🟩"}
+
     result_emoji = color_emoji.get(result, result)
     color_emoji_str = color_emoji.get(color, color)
 
@@ -131,10 +133,9 @@ def roll():
 
     if reward_msg:
         msg += f"\n{reward_msg}"
-
     return text_response(msg)
 
-# =============== БАЛАНС 💰 ===============
+# ================== БАЛАНС 💰 ==================
 
 @app.route("/balance")
 def balance():
@@ -147,7 +148,7 @@ def balance():
         msg += f"\n{reward_msg}"
     return text_response(msg)
 
-# =============== БОНУС 🎁 ===============
+# ================== БОНУС 🎁 ==================
 
 @app.route("/bonus")
 def bonus():
@@ -168,7 +169,7 @@ def bonus():
         msg += f"\n{reward_msg}"
     return text_response(msg)
 
-# =============== СТАТИСТИКА 📊 ===============
+# ================== СТАТИСТИКА 📊 ==================
 
 @app.route("/stats")
 def stats_route():
@@ -181,13 +182,12 @@ def stats_route():
         msg += f"\n{reward_msg}"
     return text_response(msg)
 
-# =============== ТОП 10 💎 ===============
+# ================== ТОП 10 💎 ==================
 
 @app.route("/top")
 def top():
     user_raw = request.args.get("user") or ""
     reward_msg = reward_on_command(user_raw)
-
     if not balances:
         return text_response("📉 Пока никто не играет!")
     sorted_players = sorted(balances.items(), key=lambda x: x[1], reverse=True)
@@ -200,7 +200,7 @@ def top():
         msg += f"\n{reward_msg}"
     return text_response(msg)
 
-# =============== АДМИН-КОМАНДЫ 👑 ===============
+# ================== АДМИН-КОМАНДЫ 👑 ==================
 
 @app.route("/admin")
 def admin():
@@ -240,7 +240,7 @@ def admin():
         msg += f"\n{reward_msg}"
     return text_response(msg)
 
-# =============== ГЛАВНАЯ ===============
+# ================== ГЛАВНАЯ ==================
 
 @app.route("/")
 def home():
