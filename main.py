@@ -1,9 +1,8 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import random, json, os, datetime, time
 
 app = Flask(__name__)
 
-# === Настройки ===
 DATA_FILE = "balances.json"
 STATS_FILE = "stats.json"
 BONUS_FILE = "bonuses.json"
@@ -14,7 +13,6 @@ DAILY_BONUS = 500
 WATCH_REWARD = 500
 WATCH_INTERVAL = 15 * 60  # 15 минут в секундах
 
-# === Вспомогательные функции ===
 def load_json(file):
     if not os.path.exists(file):
         return {}
@@ -30,16 +28,13 @@ stats = load_json(STATS_FILE)
 bonuses = load_json(BONUS_FILE)
 watchtime = load_json(WATCH_FILE)
 
-
 def get_balance(user):
     if user not in balances:
         balances[user] = START_BALANCE
         save_json(DATA_FILE, balances)
     return balances[user]
 
-
 def reward_watchtime(user):
-    """Начисляет награду за активность, если прошло >= 15 минут"""
     now = time.time()
     last_time = watchtime.get(user, 0)
     if now - last_time >= WATCH_INTERVAL:
@@ -50,8 +45,6 @@ def reward_watchtime(user):
         return f"⏱ {user} получает {WATCH_REWARD} монет за активность на стриме! 🎁 Баланс: {balances[user]}"
     return None
 
-
-# === Рулетка ===
 @app.route("/roll")
 def roll():
     user = request.args.get("user")
@@ -59,18 +52,17 @@ def roll():
     bet = request.args.get("bet")
 
     if not user or not color or not bet:
-        return jsonify({"message": "❌ Используй: !roll [red/black/green] [ставка]"}), 400
+        return "❌ Используй: !roll [red/black/green] [ставка]"
 
     try:
         bet = int(bet)
     except ValueError:
-        return jsonify({"message": "❌ Ставка должна быть числом!"}), 400
+        return "❌ Ставка должна быть числом!"
 
     balance = get_balance(user)
     if bet > balance:
-        return jsonify({"message": f"💸 Недостаточно монет! Баланс: {balance}"}), 400
+        return f"💸 Недостаточно монет! Баланс: {balance}"
 
-    # Проверка на награду за активность
     reward_msg = reward_watchtime(user)
 
     balances[user] -= bet
@@ -95,36 +87,34 @@ def roll():
     if reward_msg:
         msg += f"\n{reward_msg}"
 
-    return jsonify({"message": msg})
+    return msg
 
 
-# === Баланс ===
 @app.route("/balance")
 def balance():
     user = request.args.get("user")
     if not user:
-        return jsonify({"message": "❌ Укажи имя пользователя!"}), 400
+        return "❌ Укажи имя пользователя!"
 
     reward_msg = reward_watchtime(user)
     bal = get_balance(user)
     msg = f"💰 Баланс {user}: {bal} монет"
     if reward_msg:
         msg += f"\n{reward_msg}"
-    return jsonify({"message": msg})
+    return msg
 
 
-# === Ежедневный бонус ===
 @app.route("/bonus")
 def bonus():
     user = request.args.get("user")
     if not user:
-        return jsonify({"message": "❌ Укажи имя пользователя!"}), 400
+        return "❌ Укажи имя пользователя!"
 
     today = datetime.date.today().isoformat()
     last_claim = bonuses.get(user)
 
     if last_claim == today:
-        return jsonify({"message": "🎁 Ты уже получал бонус сегодня! Возвращайся завтра!"})
+        return "🎁 Ты уже получал бонус сегодня! Возвращайся завтра!"
 
     bonuses[user] = today
     balances[user] = get_balance(user) + DAILY_BONUS
@@ -132,27 +122,24 @@ def bonus():
     save_json(BONUS_FILE, bonuses)
     save_json(DATA_FILE, balances)
 
-    msg = f"🎁 {user} получает ежедневный бонус {DAILY_BONUS} монет! Баланс: {balances[user]}"
-    return jsonify({"message": msg})
+    return f"🎁 {user} получает ежедневный бонус {DAILY_BONUS} монет! Баланс: {balances[user]}"
 
 
-# === Топ игроков ===
 @app.route("/top")
 def top():
     if not balances:
-        return jsonify({"message": "😴 Ещё никто не играл!"})
+        return "😴 Ещё никто не играл!"
 
     top_players = sorted(balances.items(), key=lambda x: x[1], reverse=True)[:5]
     msg = "🏆 Топ игроков:\n" + "\n".join([f"{i+1}. {u} — {b} монет" for i, (u, b) in enumerate(top_players)])
-    return jsonify({"message": msg})
+    return msg
 
 
-# === Статистика ===
 @app.route("/stats")
 def user_stats():
     user = request.args.get("user")
     if not user:
-        return jsonify({"message": "❌ Укажи имя пользователя!"}), 400
+        return "❌ Укажи имя пользователя!"
 
     reward_msg = reward_watchtime(user)
     s = stats.get(user, {"wins": 0, "losses": 0})
@@ -161,10 +148,9 @@ def user_stats():
     msg = f"📊 Статистика {user}: Побед — {s['wins']}, Поражений — {s['losses']} (WinRate: {winrate:.1f}%)"
     if reward_msg:
         msg += f"\n{reward_msg}"
-    return jsonify({"message": msg})
+    return msg
 
 
-# === Главная ===
 @app.route("/")
 def home():
     return "🎰 Twitch Casino Bot — активность, бонусы и рулетка работают!"
