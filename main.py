@@ -91,8 +91,8 @@ def text_response(msg):
 
 # =============== РУЛЕТКА 🎰 ===============
 
-@app.route("/roulette")
-def roulette():
+@app.route("/roll")
+def roll():
     user_raw = request.args.get("user") or ""
     reward_msg = reward_on_command(user_raw)
 
