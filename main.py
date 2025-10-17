@@ -17,6 +17,28 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")  # пример: gxku999/kazikbot
 GITHUB_USER = os.getenv("GITHUB_USER")
 
+import subprocess
+
+def save_balances():
+    try:
+        with open(LOCAL_FILE, "w", encoding="utf-8") as f:
+            json.dump(balances, f, ensure_ascii=False, indent=2)
+        log(f"💾 Сохранено {LOCAL_FILE}")
+
+        # === авто-пуш в GitHub ===
+        subprocess.run(["git", "add", LOCAL_FILE])
+        subprocess.run(["git", "commit", "-m", "update balances.json"], check=False)
+        subprocess.run([
+            "git", "push",
+            f"https://{os.getenv('GITHUB_USER')}:{os.getenv('GITHUB_TOKEN')}@github.com/{os.getenv('GITHUB_REPO')}.git",
+            "HEAD:main"
+        ], check=False)
+
+        log("✅ balances.json синхронизирован с GitHub.")
+    except Exception as e:
+        log(f"⚠️ Ошибка сохранения файла: {e}")
+
+
 # === Вспомогательные функции ===
 def log(msg):
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
@@ -148,3 +170,4 @@ def top():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
