@@ -1,1 +1,6 @@
 {}
+
+git add balances.json
+git commit -m "Add balances file"
+git push
+
