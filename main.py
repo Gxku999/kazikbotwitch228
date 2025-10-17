@@ -186,8 +186,8 @@ def stats():
         f"📈 Чистая прибыль: {net}"
     )
 
-@app.route("/give")
-def give():
+@app.route("/addcoin")
+def addcoin():
     admin = request.args.get("admin", "").strip().lower()
     user = request.args.get("user", "").strip().lower()
     amount = request.args.get("amount", "").strip()
@@ -196,7 +196,7 @@ def give():
         return text_response("⛔ У тебя нет прав для этой команды!")
 
     if not user or not amount:
-        return text_response("❌ Формат: /give?admin=ник&user=ник&amount=100")
+        return text_response("❌ Формат: /addcoin?admin=ник&user=ник&amount=100")
 
     try:
         amt = int(amount)
@@ -208,8 +208,8 @@ def give():
     save_balances()
     return text_response(f"💸 {admin} выдал {amt} монет игроку {user}. Баланс: {balances[u]['balance']}")
 
-@app.route("/take")
-def take():
+@app.route("/removecoin")
+def removecoin():
     admin = request.args.get("admin", "").strip().lower()
     user = request.args.get("user", "").strip().lower()
     amount = request.args.get("amount", "").strip()
@@ -218,7 +218,7 @@ def take():
         return text_response("⛔ У тебя нет прав для этой команды!")
 
     if not user or not amount:
-        return text_response("❌ Формат: /take?admin=ник&user=ник&amount=100")
+        return text_response("❌ Формат: /removecoin?admin=ник&user=ник&amount=100")
 
     try:
         amt = int(amount)
@@ -232,3 +232,4 @@ def take():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
