@@ -230,6 +230,23 @@ def removecoin():
     save_balances()
     return text_response(f"💀 {admin} изъял {amt} монет у {user}. Баланс: {balances[u]['balance']}")
 
+@app.route("/resetall")
+def reset_all():
+    admin = request.args.get("admin", "").strip().lower()
+
+    if admin not in ADMINS:
+        return text_response("⛔ У тебя нет прав для глобального сброса.")
+
+    global balances
+    balances = {}
+
+    # Можно создать пустой balances.json с сохранением
+    save_balances()
+
+    return text_response(f"🧹 Все игроки и их статистика полностью сброшены админом {admin}.")
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
