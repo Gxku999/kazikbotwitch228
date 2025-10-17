@@ -9,9 +9,9 @@ import os
 app = Flask(__name__)
 
 # === ⚙️ Настройки GitHub Sync ===
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")       # например: "gxku999/kazikbot"
-GITHUB_PATH = os.getenv("GITHUB_PATH", "balances.json")
+GITHUB_TOKEN = os.getenv("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")
+GITHUB_REPO = os.getenv("Gxku999/kazikbotwitch228")       # например: "gxku999/kazikbot"
+GITHUB_PATH = os.getenv("balances.json", "balances.json")
 
 LOCAL_FILE = "balances.json"
 BONUS_AMOUNT = 500
