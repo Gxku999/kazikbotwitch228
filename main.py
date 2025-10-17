@@ -68,8 +68,26 @@ def roulette():
     result = "green" if roll == 0 else ("red" if roll % 2 == 0 else "black")
 
     if color == result:
-    multiplier = 14 if result == "green" else 2
-    win = bet * (multiplier - 1)
-    balance += win
+        multiplier = 14 if result == "green" else 2
+        win = bet * (multiplier - 1)
+        balance += win
+        msg = f"{user}, выпало {result} ({roll}). Ты выиграл {win}! Баланс: {balance}"
+    else:
+        balance -= bet
+        msg = f"{user}, выпало {result} ({roll}). Ты проиграл {bet}. Баланс: {balance}"
+
+    update_balance(user, balance)
+    return msg
 
 
+@app.route("/balance")
+def balance():
+    user = request.args.get("user")
+    if not user:
+        return "Укажи ?user=твой_ник"
+    balance = get_balance(user)
+    return f"{user}, твой баланс: {balance}."
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
