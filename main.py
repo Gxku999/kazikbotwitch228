@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, Response
 import random, json, os, datetime, time
 
 app = Flask(__name__)
@@ -13,26 +13,36 @@ DAILY_BONUS = 500
 WATCH_REWARD = 500
 WATCH_INTERVAL = 15 * 60  # 15 минут в секундах
 
+
 def load_json(file):
     if not os.path.exists(file):
         return {}
-    with open(file, "r") as f:
+    with open(file, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def save_json(file, data):
-    with open(file, "w") as f:
+    with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
 
 balances = load_json(DATA_FILE)
 stats = load_json(STATS_FILE)
 bonuses = load_json(BONUS_FILE)
 watchtime = load_json(WATCH_FILE)
 
+
 def get_balance(user):
     if user not in balances:
         balances[user] = START_BALANCE
         save_json(DATA_FILE, balances)
     return balances[user]
+
+
+def text_response(msg: str):
+    """Возвращает текст, который Twitch отобразит корректно"""
+    return Response(msg, content_type="text/plain; charset=utf-8")
+
 
 def reward_watchtime(user):
     now = time.time()
@@ -45,6 +55,7 @@ def reward_watchtime(user):
         return f"⏱ {user} получает {WATCH_REWARD} монет за активность на стриме! 🎁 Баланс: {balances[user]}"
     return None
 
+
 @app.route("/roll")
 def roll():
     user = request.args.get("user")
@@ -52,19 +63,18 @@ def roll():
     bet = request.args.get("bet")
 
     if not user or not color or not bet:
-        return "❌ Используй: !roll [red/black/green] [ставка]"
+        return text_response("❌ Используй: !roll [red/black/green] [ставка]")
 
     try:
         bet = int(bet)
     except ValueError:
-        return "❌ Ставка должна быть числом!"
+        return text_response("❌ Ставка должна быть числом!")
 
     balance = get_balance(user)
     if bet > balance:
-        return f"💸 Недостаточно монет! Баланс: {balance}"
+        return text_response(f"💸 Недостаточно монет! Баланс: {balance}")
 
     reward_msg = reward_watchtime(user)
-
     balances[user] -= bet
 
     result = random.choices(["red", "black", "green"], weights=[48, 48, 4])[0]
@@ -87,59 +97,58 @@ def roll():
     if reward_msg:
         msg += f"\n{reward_msg}"
 
-    return msg
+    return text_response(msg)
 
 
 @app.route("/balance")
 def balance():
     user = request.args.get("user")
     if not user:
-        return "❌ Укажи имя пользователя!"
+        return text_response("❌ Укажи имя пользователя!")
 
     reward_msg = reward_watchtime(user)
     bal = get_balance(user)
     msg = f"💰 Баланс {user}: {bal} монет"
     if reward_msg:
         msg += f"\n{reward_msg}"
-    return msg
+    return text_response(msg)
 
 
 @app.route("/bonus")
 def bonus():
     user = request.args.get("user")
     if not user:
-        return "❌ Укажи имя пользователя!"
+        return text_response("❌ Укажи имя пользователя!")
 
     today = datetime.date.today().isoformat()
     last_claim = bonuses.get(user)
 
     if last_claim == today:
-        return "🎁 Ты уже получал бонус сегодня! Возвращайся завтра!"
+        return text_response("🎁 Ты уже получал бонус сегодня! Возвращайся завтра!")
 
     bonuses[user] = today
     balances[user] = get_balance(user) + DAILY_BONUS
-
     save_json(BONUS_FILE, bonuses)
     save_json(DATA_FILE, balances)
 
-    return f"🎁 {user} получает ежедневный бонус {DAILY_BONUS} монет! Баланс: {balances[user]}"
+    return text_response(f"🎁 {user} получает ежедневный бонус {DAILY_BONUS} монет! Баланс: {balances[user]}")
 
 
 @app.route("/top")
 def top():
     if not balances:
-        return "😴 Ещё никто не играл!"
+        return text_response("😴 Ещё никто не играл!")
 
     top_players = sorted(balances.items(), key=lambda x: x[1], reverse=True)[:5]
     msg = "🏆 Топ игроков:\n" + "\n".join([f"{i+1}. {u} — {b} монет" for i, (u, b) in enumerate(top_players)])
-    return msg
+    return text_response(msg)
 
 
 @app.route("/stats")
 def user_stats():
     user = request.args.get("user")
     if not user:
-        return "❌ Укажи имя пользователя!"
+        return text_response("❌ Укажи имя пользователя!")
 
     reward_msg = reward_watchtime(user)
     s = stats.get(user, {"wins": 0, "losses": 0})
@@ -148,12 +157,12 @@ def user_stats():
     msg = f"📊 Статистика {user}: Побед — {s['wins']}, Поражений — {s['losses']} (WinRate: {winrate:.1f}%)"
     if reward_msg:
         msg += f"\n{reward_msg}"
-    return msg
+    return text_response(msg)
 
 
 @app.route("/")
 def home():
-    return "🎰 Twitch Casino Bot — активность, бонусы и рулетка работают!"
+    return text_response("🎰 Twitch Casino Bot — активность, бонусы и рулетка работают!")
 
 
 if __name__ == "__main__":
