@@ -68,5 +68,8 @@ def roulette():
     result = "green" if roll == 0 else ("red" if roll % 2 == 0 else "black")
 
     if color == result:
-        multiplier = 14 if result == "green" else 2
-        win = bet * (multiplier -*
+    multiplier = 14 if result == "green" else 2
+    win = bet * (multiplier - 1)
+    balance += win
+
+
