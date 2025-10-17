@@ -6,7 +6,7 @@ app = Flask(__name__)
 
 # === Настройки ===
 BALANCES_FILE = "balances.json"
-ADMINS = ["gxku999"]  # <-- впиши свой ник(и) в нижнем регистре
+ADMINS = ["gxku999"]  # твой Twitch ник в нижнем регистре
 BONUS_AMOUNT = 500
 BONUS_INTERVAL = 60 * 60 * 24  # 24 часа
 ACTIVE_REWARD = 500
@@ -23,7 +23,7 @@ if os.path.exists(BALANCES_FILE):
 else:
     balances = {}
 
-# === Утилиты ===
+# === Вспомогательные функции ===
 def save_data():
     with open(BALANCES_FILE, "w", encoding="utf-8") as f:
         json.dump(balances, f, ensure_ascii=False, indent=2)
@@ -31,292 +31,164 @@ def save_data():
 def text_response(msg: str):
     return Response(msg, mimetype="text/plain; charset=utf-8")
 
-def norm_name(n: str) -> str:
-    return (n or "").strip()
+def color_icon(color):
+    return {"red": "🟥", "black": "⬛", "green": "🟩"}.get(color, "❓")
 
-def norm_key(n: str) -> str:
-    return (n or "").strip().lower()
-
-def get_user_entry(key_name: str):
-    """Возвращает объект пользователя; если нет — создаёт"""
-    k = norm_key(key_name)
-    if k == "":
-        return None
-    if k not in balances:
-        balances[k] = {
-            "display": norm_name(key_name),
+def get_user(name):
+    name = name.strip().lower()
+    if name not in balances:
+        balances[name] = {
             "balance": START_BALANCE,
             "wins": 0,
             "losses": 0,
             "last_bonus": 0,
             "last_active": 0
         }
-    # Убедимся, что display поле присутствует и содержит оригинальный регистр (если передавали)
-    if not balances[k].get("display"):
-        balances[k]["display"] = norm_name(key_name)
-    return balances[k]
+    return balances[name]
 
-def ensure_user_by_candidates(*cands):
-    """Пытаемся найти правильный ник среди кандидатов (возвращаем первый адекватный).
-       'Адекватный' = не color word и не чисто число и не пустая строка."""
-    colors = {"red","black","green"}
-    for c in cands:
-        if not c:
-            continue
-        s = str(c).strip()
-        if s == "":
-            continue
-        low = s.lower()
-        if low in ("null","none"):
-            continue
-        if low in colors:
-            continue
-        if s.isdigit():
-            continue
-        return s
-    # если не нашли — вернём первый ненулевой кандидат в естественном виде
-    for c in cands:
-        if c and str(c).strip() and str(c).strip().lower() not in ("null","none"):
-            return str(c).strip()
-    return ""
-
-def color_icon(color):
-    icons = {"red": "🟥", "black": "⬛", "green": "🟩"}
-    return icons.get((color or "").lower(), "❓")
-
-def parse_params_for_roll():
-    """
-    Универсально вытаскивает user_display, user_key, color, bet из любых комбинаций параметров,
-    устойчив к: user/null swapping, sender, nick, username и т.п.
-    """
-    # Соберём сырьё
-    raw_user = request.args.get("user") or request.args.get("sender") or request.args.get("nick") or request.args.get("username") or ""
-    raw_color = request.args.get("color") or request.args.get("1") or ""
-    raw_bet = request.args.get("bet") or request.args.get("amount") or request.args.get("2") or ""
-
-    # Иногда StreamElements/шаблоны могут передать цвет в поле user (например user=red),
-    # или передать ник в поле color. Попробуем определить правильный ник:
-    colors = {"red","black","green"}
-    candidates = []
-    # Соберём все переданные значения в порядке вероятности
-    for v in [raw_user, raw_color, raw_bet]:
-        if v is not None:
-            candidates.append(str(v).strip())
-
-    # Попытка 1: нормальная ситуация — raw_user не цвет и не число -> good
-    if raw_user and raw_user.strip().lower() not in colors and not raw_user.strip().isdigit() and raw_user.strip().lower() not in ("null","none"):
-        user_display = raw_user.strip()
-        user_key = norm_key(user_display)
-        color = (raw_color or "").strip().lower()
-        bet = (raw_bet or "").strip()
-        return user_display, user_key, color, bet
-
-    # Попытка 2: если raw_user выглядит как цвет или число — найдем реальный ник среди других params
-    alt_user = ensure_user_by_candidates(raw_color, raw_bet, *candidates)
-    if alt_user:
-        # теперь нужно определить, какой из полей является цвет, а какой ставка
-        # предпочтение: поле, которое равняется color word -> color; numeric -> bet
-        color = ""
-        bet = ""
-        # check each original arg
-        for v in [raw_user, raw_color, raw_bet]:
-            if not v:
-                continue
-            s = str(v).strip()
-            low = s.lower()
-            if low in colors and color == "":
-                color = low
-            elif (s.isdigit() or (s.startswith('-') and s[1:].isdigit())) and bet == "":
-                bet = s
-        # if still missing, try fill from remaining candidates (best effort)
-        if color == "":
-            for v in [raw_color, raw_bet, raw_user]:
-                if v and str(v).strip().lower() in colors:
-                    color = str(v).strip().lower()
-                    break
-        if bet == "":
-            for v in [raw_color, raw_bet, raw_user]:
-                if v and str(v).strip().isdigit():
-                    bet = str(v).strip()
-                    break
-        user_display = alt_user
-        user_key = norm_key(user_display)
-        return user_display, user_key, color, bet
-
-    # Попытка 3: ничего не подошло — используем raw_user как ник (может быть empty)
-    user_display = raw_user.strip()
-    user_key = norm_key(user_display)
-    color = (raw_color or "").strip().lower()
-    bet = (raw_bet or "").strip()
-    return user_display, user_key, color, bet
-
-# === Эндпоинты ===
-
+# === Рулетка ===
 @app.route("/roulette")
 def roulette():
-    # универсальный парсер
-    user_display, user_key, color, bet_raw = parse_params_for_roll()
+    # ПАРАМЕТРЫ ТОЛЬКО В ЭТОМ ПОРЯДКЕ:
+    # /roulette?user=<ник>&color=<red/black/green>&bet=<ставка>
+    user = request.args.get("user")
+    color = request.args.get("color")
+    bet = request.args.get("bet")
 
-    if not user_display:
-        return text_response("❌ Не удалось определить пользователя. Укажи правильно: !roll <color> <bet>")
+    if not user or not color or not bet:
+        return text_response("❌ Использование: !roll <red/black/green> <ставка>")
 
-    if not color:
-        return text_response("❌ Не указан цвет. Используй: red, black или green")
+    user_display = user
+    user_key = user.lower()
 
-    if color not in ("red","black","green"):
-        return text_response("❌ Цвет должен быть red, black или green")
-
-    if not bet_raw:
-        return text_response("❌ Укажи ставку. Пример: !roll red 100")
-
-    if bet_raw.lower() in ("null","none",""):
+    color = color.lower().strip()
+    try:
+        bet = int(bet)
+    except ValueError:
         return text_response("❌ Ставка должна быть числом!")
 
-    try:
-        bet = int(bet_raw)
-    except ValueError:
-        return text_response("❌ Ставка должна быть целым числом!")
+    if color not in ["red", "black", "green"]:
+        return text_response("❌ Цвет должен быть red, black или green!")
 
-    # Получаем entry пользователя (создаст, если нет)
-    entry = get_user_entry(user_display)
-    if entry is None:
-        return text_response("❌ Неверный ник пользователя.")
+    data = get_user(user_key)
 
     if bet <= 0:
-        return text_response("❌ Ставка должна быть положительной!")
+        return text_response("❌ Ставка должна быть больше нуля!")
 
-    if entry["balance"] < bet:
-        return text_response(f"💸 У {entry['display']} недостаточно средств! Баланс: {entry['balance']}")
+    if data["balance"] < bet:
+        return text_response(f"💸 {user_display}, у тебя недостаточно монет! Баланс: {data['balance']}")
 
-    # снимаем ставку сразу
-    entry["balance"] -= bet
+    # снимаем ставку
+    data["balance"] -= bet
 
-    # результат
-    result = random.choices(["red","black","green"], weights=[47,47,6])[0]
+    # определяем результат
+    result = random.choices(["red", "black", "green"], weights=[47, 47, 6])[0]
     multiplier = 14 if result == "green" else 2
 
-    win_amount = bet * multiplier if result == color else 0
-
-    if win_amount > 0:
-        # добавляем выигрыш (включая возврат ставки)
-        entry["balance"] += win_amount
-        entry["wins"] = entry.get("wins",0) + 1
-        delta = win_amount - bet
-        msg = f"🎰 {entry['display']} ставит {bet} на {color_icon(color)}! Выпало {color_icon(result)} — ✅ Победа! | +{delta} | Баланс: {entry['balance']}"
+    if result == color:
+        win_amount = bet * multiplier
+        data["balance"] += win_amount
+        data["wins"] += 1
+        msg = (
+            f"🎰 {user_display} ставит {bet} на {color_icon(color)}! "
+            f"Выпало {color_icon(result)} — ✅ Победа! "
+            f"| +{win_amount - bet} | Баланс: {data['balance']}"
+        )
     else:
-        entry["losses"] = entry.get("losses",0) + 1
-        msg = f"🎰 {entry['display']} ставит {bet} на {color_icon(color)}! Выпало {color_icon(result)} — ❌ Проигрыш | Баланс: {entry['balance']}"
+        data["losses"] += 1
+        msg = (
+            f"🎰 {user_display} ставит {bet} на {color_icon(color)}! "
+            f"Выпало {color_icon(result)} — ❌ Проигрыш | Баланс: {data['balance']}"
+        )
 
     save_data()
     return text_response(msg)
 
+# === Баланс ===
 @app.route("/balance")
 def balance():
-    # Try multiple possible fields for user
-    user_try = request.args.get("user") or request.args.get("sender") or request.args.get("nick") or request.args.get("username") or ""
-    user_display = ensure_user_by_candidates(user_try, request.args.get("1"), request.args.get("2")) or user_try
-    if not user_display:
-        return text_response("❌ Укажи имя пользователя.")
-    entry = get_user_entry(user_display)
-    if entry is None:
-        return text_response("❌ Неверный ник.")
-    now = time.time()
-    reward_msg = ""
-    if now - entry.get("last_active",0) >= ACTIVE_INTERVAL:
-        entry["balance"] += ACTIVE_REWARD
-        entry["last_active"] = now
-        reward_msg = f"\n⏱ {entry['display']} получает {ACTIVE_REWARD} монет за активность на стриме! 🎁"
-    save_data()
-    return text_response(f"💰 Баланс {entry['display']}: {entry['balance']}{reward_msg}")
+    user = request.args.get("user")
+    if not user:
+        return text_response("❌ Укажи ник пользователя.")
 
+    user_display = user
+    data = get_user(user_display)
+    now = time.time()
+
+    msg = f"💰 Баланс {user_display}: {data['balance']} монет"
+
+    # награда за активность
+    if now - data["last_active"] >= ACTIVE_INTERVAL:
+        data["balance"] += ACTIVE_REWARD
+        data["last_active"] = now
+        msg += f"\n⏱ {user_display} получает {ACTIVE_REWARD} монет за активность на стриме! 🎁"
+
+    save_data()
+    return text_response(msg)
+
+# === Ежедневный бонус ===
 @app.route("/bonus")
 def bonus():
-    user_try = request.args.get("user") or request.args.get("sender") or ""
-    user_display = ensure_user_by_candidates(user_try, request.args.get("1")) or user_try
-    if not user_display:
-        return text_response("❌ Укажи имя пользователя.")
-    entry = get_user_entry(user_display)
-    if entry is None:
-        return text_response("❌ Неверный ник.")
+    user = request.args.get("user")
+    if not user:
+        return text_response("❌ Укажи ник пользователя.")
+    data = get_user(user)
     now = time.time()
-    last = entry.get("last_bonus", 0)
-    if now - last < BONUS_INTERVAL:
-        remaining = int((BONUS_INTERVAL - (now - last)) / 3600)
-        return text_response(f"⏳ {entry['display']}, бонус будет доступен через {remaining} ч.")
-    entry["balance"] += BONUS_AMOUNT
-    entry["last_bonus"] = now
-    save_data()
-    return text_response(f"🎁 {entry['display']} получает ежедневный бонус {BONUS_AMOUNT} монет! Баланс: {entry['balance']}")
 
-@app.route("/stats")
-def stats_route():
-    user_try = request.args.get("user") or request.args.get("sender") or ""
-    user_display = ensure_user_by_candidates(user_try, request.args.get("1")) or user_try
-    if not user_display:
-        return text_response("❌ Укажи имя пользователя.")
-    entry = get_user_entry(user_display)
-    if entry is None:
-        return text_response("❌ Неверный ник.")
-    wins = entry.get("wins",0)
-    losses = entry.get("losses",0)
-    total = wins + losses
-    wr = f"{(wins/total*100):.1f}%" if total>0 else "0%"
-    save_data()
-    return text_response(f"📊 Статистика {entry['display']}: Побед — {wins}, Поражений — {losses} (WinRate: {wr})")
+    if now - data["last_bonus"] < BONUS_INTERVAL:
+        remaining = int((BONUS_INTERVAL - (now - data["last_bonus"])) / 3600)
+        return text_response(f"⏳ {user}, бонус уже получен! Попробуй через {remaining} ч.")
 
+    data["balance"] += BONUS_AMOUNT
+    data["last_bonus"] = now
+    save_data()
+    return text_response(f"🎁 {user} получает ежедневный бонус {BONUS_AMOUNT} монет! Баланс: {data['balance']}")
+
+# === Топ-10 ===
 @app.route("/top")
 def top():
-    # build top-10 sorted by balance
-    if not balances:
-        return text_response("📉 Пока никто не играет!")
-    sorted_players = sorted(balances.items(), key=lambda x: x[1].get("balance",0), reverse=True)
-    top10 = sorted_players[:10]
-    lines = [f"🏆 Топ 10 игроков:"]
-    for i,(k,v) in enumerate(top10, start=1):
-        display = v.get("display", k)
-        bal = v.get("balance", 0)
-        lines.append(f"{i}. {display} — {bal}")
-    save_data()
-    return text_response("\n".join(lines))
+    top10 = sorted(balances.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
+    msg = "🏆 Топ 10 игроков:\n"
+    for i, (u, d) in enumerate(top10, start=1):
+        msg += f"{i}. {u} — {d['balance']} монет\n"
+    return text_response(msg.strip())
 
+# === Админ ===
 @app.route("/admin")
 def admin():
-    caller = request.args.get("user") or request.args.get("sender") or ""
-    caller_key = norm_key(caller)
-    if caller_key not in [a.lower() for a in ADMINS]:
-        return text_response("🚫 У тебя нет прав администратора!")
+    user = request.args.get("user", "").lower()
+    target = request.args.get("target")
+    action = request.args.get("action")
+    amount = request.args.get("amount")
 
-    target = request.args.get("target") or request.args.get("1") or ""
-    action = (request.args.get("action") or request.args.get("2") or "").lower()
-    amount_raw = request.args.get("amount") or request.args.get("3") or ""
+    if user not in ADMINS:
+        return text_response("⛔ Нет доступа.")
 
-    if not target or not action or not amount_raw:
-        return text_response("❌ Использование: /admin?user=AdminNick&target=Nick&action=add|remove&amount=1000")
+    if not all([target, action, amount]):
+        return text_response("❌ Использование: !admin <ник> <add/remove> <сумма>")
 
     try:
-        amount = int(amount_raw)
-    except:
+        amount = int(amount)
+    except ValueError:
         return text_response("❌ Сумма должна быть числом!")
 
-    entry = get_user_entry(target)
-    if entry is None:
-        return text_response("❌ Неверный ник цели.")
-
+    data = get_user(target)
     if action == "add":
-        entry["balance"] += amount
-        res = f"✅ Админ {caller} добавил {amount} монет игроку {entry['display']}. Баланс: {entry['balance']}"
-    elif action in ("remove","sub","take"):
-        entry["balance"] = max(0, entry["balance"] - amount)
-        res = f"⚠️ Админ {caller} снял {amount} монет с {entry['display']}. Баланс: {entry['balance']}"
+        data["balance"] += amount
+        msg = f"✅ {user} добавил {amount} монет игроку {target}. Баланс: {data['balance']}"
+    elif action == "remove":
+        data["balance"] = max(0, data["balance"] - amount)
+        msg = f"⚠️ {user} забрал {amount} монет у {target}. Баланс: {data['balance']}"
     else:
-        return text_response("❌ Action должен быть add или remove")
+        return text_response("❌ Действие должно быть add или remove")
 
     save_data()
-    return text_response(res)
+    return text_response(msg)
 
+# === Главная ===
 @app.route("/")
 def home():
-    return text_response("🎰 Casino bot API работает!")
+    return text_response("✅ Twitch Casino Bot активен и работает!")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
