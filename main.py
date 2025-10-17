@@ -5,14 +5,14 @@ import random, json, time, os
 app = Flask(__name__)
 
 BALANCES_FILE = "balances.json"
-ADMINS = ["gxku999"]  # <-- твой ник
+ADMINS = ["gxku999"]  # 👈 Твой ник (стример)
 BONUS_AMOUNT = 500
-BONUS_INTERVAL = 60 * 60 * 24
+BONUS_INTERVAL = 60 * 60 * 24      # 24 часа
 ACTIVE_REWARD = 500
-ACTIVE_INTERVAL = 60 * 15
+ACTIVE_INTERVAL = 60 * 15          # 15 минут
 START_BALANCE = 1000
 
-# === загрузка ===
+# === загрузка данных ===
 if os.path.exists(BALANCES_FILE):
     with open(BALANCES_FILE, "r", encoding="utf-8") as f:
         try:
@@ -44,23 +44,21 @@ def get_user(name):
         }
     return balances[name]
 
+# 🎰 Основная команда рулетки
 @app.route("/roulette")
 def roulette():
-    # аргументы могут приходить по-разному — определим автоматически
-    user = request.args.get("user")
-    arg1 = request.args.get("color")
-    arg2 = request.args.get("bet")
+    # Параметры запроса
+    user = (request.args.get("user") or "").strip()
+    color = (request.args.get("color") or "").strip().lower()
+    bet = request.args.get("bet")
 
-    # если StreamElements перепутал местами
-    # (первый аргумент — это ник)
     colors = ["red", "black", "green"]
-    if arg1 and arg1.lower() not in colors and user and user.lower() in colors:
-        # меняем местами
-        arg1, user = user, arg1
 
-    color = (arg1 or "").lower().strip()
-    bet = arg2
-    user_display = user or "Неизвестный"
+    # 🧠 ChatElements иногда путает местами аргументы (user и color)
+    if user.lower() in colors:
+        # Меняем местами
+        color = user.lower()
+        user = (request.args.get("color") or "UnknownUser").strip()
 
     if not user or not color or not bet:
         return text_response("❌ Использование: !roll <red/black/green> <ставка>")
@@ -73,18 +71,18 @@ def roulette():
     if color not in colors:
         return text_response("❌ Цвет должен быть red, black или green!")
 
-    data = get_user(user_display)
+    data = get_user(user)
 
     if bet <= 0:
         return text_response("❌ Ставка должна быть больше нуля!")
 
     if data["balance"] < bet:
-        return text_response(f"💸 {user_display}, недостаточно монет! Баланс: {data['balance']}")
+        return text_response(f"💸 {user}, недостаточно монет! Баланс: {data['balance']}")
 
-    # снимаем ставку
+    # 💸 Снимаем ставку
     data["balance"] -= bet
 
-    # результат
+    # 🎡 Крутим рулетку
     result = random.choices(["red", "black", "green"], weights=[47, 47, 6])[0]
     multiplier = 14 if result == "green" else 2
 
@@ -93,20 +91,21 @@ def roulette():
         data["balance"] += win_amount
         data["wins"] += 1
         msg = (
-            f"🎰 {user_display} ставит {bet} на {color_icon(color)}! "
+            f"🎰 {user} ставит {bet} на {color_icon(color)}! "
             f"Выпало {color_icon(result)} — ✅ Победа! "
             f"| +{win_amount - bet} | Баланс: {data['balance']}"
         )
     else:
         data["losses"] += 1
         msg = (
-            f"🎰 {user_display} ставит {bet} на {color_icon(color)}! "
+            f"🎰 {user} ставит {bet} на {color_icon(color)}! "
             f"Выпало {color_icon(result)} — ❌ Проигрыш | Баланс: {data['balance']}"
         )
 
     save_data()
     return text_response(msg)
 
+# 💰 Проверка баланса + активность
 @app.route("/balance")
 def balance():
     user = request.args.get("user")
@@ -125,6 +124,7 @@ def balance():
     save_data()
     return text_response(msg)
 
+# 🎁 Ежедневный бонус
 @app.route("/bonus")
 def bonus():
     user = request.args.get("user")
@@ -142,14 +142,18 @@ def bonus():
     save_data()
     return text_response(f"🎁 {user} получает ежедневный бонус {BONUS_AMOUNT}! Баланс: {data['balance']}")
 
+# 🏆 Топ 10 игроков
 @app.route("/top")
 def top():
+    if not balances:
+        return text_response("Пока нет игроков 😴")
     top10 = sorted(balances.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
     msg = "🏆 Топ 10 игроков:\n"
     for i, (u, d) in enumerate(top10, 1):
         msg += f"{i}. {u} — {d['balance']} монет\n"
     return text_response(msg.strip())
 
+# 👑 Админ: добавить или убрать монеты
 @app.route("/admin")
 def admin():
     user = (request.args.get("user") or "").lower()
@@ -183,7 +187,7 @@ def admin():
 
 @app.route("/")
 def home():
-    return text_response("✅ Twitch Casino Bot активен!")
+    return text_response("✅ Twitch Casino Bot работает!")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
