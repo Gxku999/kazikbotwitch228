@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # === Настройки ===
 BALANCES_FILE = "balances.json"
-ADMINS = ["Gxku999"]  # сюда впиши свой Twitch ник
+ADMINS = ["Gxku999"]  # <-- твой Twitch ник
 BONUS_AMOUNT = 500
 BONUS_INTERVAL = 60 * 60 * 24  # 24 часа
 ACTIVE_REWARD = 500
@@ -41,6 +41,11 @@ def get_user(user):
         }
     return balances[user]
 
+def color_icon(color):
+    """Возвращает эмодзи круга по цвету"""
+    icons = {"red": "🟥", "black": "⬛", "green": "🟩"}
+    return icons.get(color, "❓")
+
 # === Рулетка ===
 @app.route("/roulette")
 def roulette():
@@ -50,6 +55,10 @@ def roulette():
 
     if not user or not color or not bet:
         return text_response("❌ Использование: !roll <red/black/green> <ставка>")
+
+    color = color.lower()
+    if color not in ["red", "black", "green"]:
+        return text_response("❌ Цвет должен быть red, black или green!")
 
     try:
         bet = int(bet)
@@ -67,16 +76,17 @@ def roulette():
     multiplier = 14 if result == "green" else 2
     win = bet * multiplier if color == result else 0
 
+    color_icon_bet = color_icon(color)
+    color_icon_result = color_icon(result)
+
     if win > 0:
         data["balance"] += win - bet
         data["wins"] += 1
-        result_icon = "🟩" if result == "green" else ("🟥" if result == "red" else "⬛")
-        msg = f"🎰 {user} ставит {bet} на {color}! Выпало {result_icon} — ✅ Победа! | +{win - bet} | Баланс: {data['balance']}"
+        msg = f"🎰 {user} ставит {bet} на {color_icon_bet}! Выпало {color_icon_result} — ✅ Победа! | +{win - bet} | Баланс: {data['balance']}"
     else:
         data["balance"] -= bet
         data["losses"] += 1
-        result_icon = "🟩" if result == "green" else ("🟥" if result == "red" else "⬛")
-        msg = f"🎰 {user} ставит {bet} на {color}! Выпало {result_icon} — ❌ Проигрыш | Баланс: {data['balance']}"
+        msg = f"🎰 {user} ставит {bet} на {color_icon_bet}! Выпало {color_icon_result} — ❌ Проигрыш | Баланс: {data['balance']}"
 
     save_data()
     return text_response(msg)
