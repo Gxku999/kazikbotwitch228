@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, Response
 import random
 import json
 import os
@@ -6,180 +6,200 @@ import time
 
 app = Flask(__name__)
 
-DATA_FILE = "balances.json"
+# ====== НАСТРОЙКИ ======
+BALANCE_FILE = "balances.json"
+BONUS_AMOUNT = 500
 BONUS_INTERVAL = 15 * 60  # 15 минут
-DAILY_BONUS = 500
-ACTIVE_BONUS = 500
+ADMINS = ["gxku999"]  # <-- Твой ник на Twitch
 START_BALANCE = 1000
 
-ADMINS = ["gxku999"]  # 👉 твой ник на Twitch
+# ====== ХРАНЕНИЕ ДАННЫХ ======
+if not os.path.exists(BALANCE_FILE):
+    with open(BALANCE_FILE, "w") as f:
+        json.dump({}, f)
 
-# --- Утилиты ---
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        return {}
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
+def load_balances():
+    with open(BALANCE_FILE, "r") as f:
         return json.load(f)
 
-def save_data():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+def save_balances(data):
+    with open(BALANCE_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
-def color_icon(color):
-    return {"red": "🟥", "black": "⬛", "green": "🟩"}.get(color, "❓")
+def text_response(msg: str):
+    return Response(msg, mimetype="text/plain; charset=utf-8")
 
-def text_response(message):
-    return jsonify({"message": message})
-
-def get_user(user):
-    if user not in users:
-        users[user] = {
+# ====== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ======
+def get_balance(user):
+    data = load_balances()
+    user = user.lower()
+    if user not in data:
+        data[user] = {
             "balance": START_BALANCE,
-            "wins": 0,
-            "losses": 0,
             "last_bonus": 0,
-            "last_active": 0
+            "wins": 0,
+            "losses": 0
         }
-    return users[user]
+        save_balances(data)
+    return data[user]["balance"]
 
-users = load_data()
+def update_balance(user, amount):
+    data = load_balances()
+    user = user.lower()
+    if user not in data:
+        get_balance(user)
+        data = load_balances()
+    data[user]["balance"] += amount
+    if data[user]["balance"] < 0:
+        data[user]["balance"] = 0
+    save_balances(data)
 
-# --- Роуты ---
+def can_get_bonus(user):
+    data = load_balances()
+    user = user.lower()
+    now = time.time()
+    last = data[user].get("last_bonus", 0)
+    if now - last >= BONUS_INTERVAL:
+        data[user]["last_bonus"] = now
+        data[user]["balance"] += BONUS_AMOUNT
+        save_balances(data)
+        return True
+    return False
+
+# ====== КОМАНДЫ ======
+
 @app.route("/")
 def home():
-    return "🎰 Twitch Casino Bot is running!"
-
-@app.route("/balance")
-def balance():
-    user = request.args.get("user", "").strip()
-    if not user:
-        return text_response("❌ Укажи имя пользователя!")
-
-    data = get_user(user)
-    now = time.time()
-
-    # Автобонус за активность каждые 15 минут
-    if now - data["last_active"] >= BONUS_INTERVAL:
-        data["balance"] += ACTIVE_BONUS
-        data["last_active"] = now
-        save_data()
-        return text_response(f"💰 Баланс {user}: {data['balance']} монет\n⏱ {user} получает {ACTIVE_BONUS} монет за активность! 🎁")
-
-    return text_response(f"💰 Баланс {user}: {data['balance']} монет")
-
-@app.route("/bonus")
-def bonus():
-    user = request.args.get("user", "").strip()
-    if not user:
-        return text_response("❌ Укажи имя пользователя!")
-
-    data = get_user(user)
-    now = time.time()
-
-    if now - data["last_bonus"] < 24 * 3600:
-        return text_response(f"⏳ {user}, ты уже получал бонус сегодня! Приходи завтра 🎁")
-
-    data["balance"] += DAILY_BONUS
-    data["last_bonus"] = now
-    save_data()
-
-    return text_response(f"🎁 {user} получает ежедневный бонус {DAILY_BONUS}! Баланс: {data['balance']}")
+    return text_response("✅ Казино бот работает! Команды: !roll, !balance, !bonus, !top, !stats")
 
 @app.route("/roll")
 def roll():
-    user = request.args.get("user", "").strip()
-    color = request.args.get("color", "").lower().strip()
-    bet = request.args.get("bet", "").strip()
+    user = request.args.get("user")
+    color = request.args.get("color")
+    bet = request.args.get("bet")
 
     if not user or not color or not bet:
-        return text_response("❌ Использование: !roll <red/black/green> <ставка>")
+        return text_response("⚠ Использование: !roll <red|black|green> <ставка>")
+
+    color = color.lower()
+    if color not in ["red", "black", "green"]:
+        return text_response("❌ Цвет должен быть red, black или green!")
 
     try:
         bet = int(bet)
     except ValueError:
         return text_response("❌ Ставка должна быть числом!")
 
-    if color not in ["red", "black", "green"]:
-        return text_response("❌ Цвет должен быть red, black или green!")
-
-    data = get_user(user)
+    balance = get_balance(user)
     if bet <= 0:
-        return text_response("❌ Ставка должна быть больше 0!")
+        return text_response("❌ Ставка должна быть положительной!")
+    if bet > balance:
+        return text_response(f"❌ Недостаточно монет! Баланс: {balance}")
 
-    if data["balance"] < bet:
-        return text_response(f"💸 {user}, недостаточно монет! Баланс: {data['balance']}")
+    # Рулетка
+    result = random.choices(
+        ["red", "black", "green"],
+        weights=[47, 47, 6],
+        k=1
+    )[0]
 
-    # снимаем ставку
-    data["balance"] -= bet
+    emojis = {"red": "🟥", "black": "⬛", "green": "🟩"}
 
-    # рулетка
-    result = random.choices(["red", "black", "green"], weights=[47, 47, 6])[0]
-    multiplier = 14 if result == "green" else 2
+    data = load_balances()
+    user_data = data[user.lower()]
 
-    if result == color:
-        win_amount = bet * multiplier
-        data["balance"] += win_amount
-        data["wins"] += 1
-        msg = f"🎰 {user} ставит {bet} на {color_icon(color)}! Выпало {color_icon(result)} — ✅ Победа! +{win_amount - bet} | Баланс: {data['balance']}"
+    if color == result:
+        multiplier = 14 if result == "green" else 2
+        win = bet * multiplier
+        update_balance(user, win)
+        user_data["wins"] += 1
+        outcome = f"✅ Победа! | +{win} | Баланс: {get_balance(user)}"
     else:
-        data["losses"] += 1
-        msg = f"🎰 {user} ставит {bet} на {color_icon(color)}! Выпало {color_icon(result)} — ❌ Проигрыш | Баланс: {data['balance']}"
+        update_balance(user, -bet)
+        user_data["losses"] += 1
+        outcome = f"❌ Проигрыш | Баланс: {get_balance(user)}"
 
-    save_data()
+    save_balances(data)
+
+    msg = f"🎰 {user} ставит {bet} на {emojis[color]}! Выпало {emojis[result]} — {outcome}"
     return text_response(msg)
 
-@app.route("/stats")
-def stats():
-    user = request.args.get("user", "").strip()
+@app.route("/balance")
+def balance():
+    user = request.args.get("user")
     if not user:
-        return text_response("❌ Укажи имя пользователя!")
+        return text_response("⚠ Укажите имя: !balance")
 
-    data = get_user(user)
-    total = data["wins"] + data["losses"]
-    winrate = (data["wins"] / total * 100) if total > 0 else 0
-    return text_response(
-        f"📊 Статистика {user}: Победы — {data['wins']}, Поражения — {data['losses']}, WinRate — {winrate:.1f}% | Баланс: {data['balance']}"
-    )
+    balance = get_balance(user)
+    bonus_msg = ""
+    if can_get_bonus(user):
+        bonus_msg = f"\n⏱ {user} получает {BONUS_AMOUNT} монет за активность на стриме! 🎁"
+
+    return text_response(f"💰 Баланс {user}: {balance} монет{bonus_msg}")
+
+@app.route("/bonus")
+def bonus():
+    user = request.args.get("user")
+    if not user:
+        return text_response("⚠ Укажите имя: !bonus")
+
+    if can_get_bonus(user):
+        return text_response(f"🎁 {user} получил бонус {BONUS_AMOUNT} монет! Баланс: {get_balance(user)}")
+    else:
+        return text_response(f"⏱ {user}, бонус можно получить только раз в 15 минут!")
 
 @app.route("/top")
 def top():
-    top_users = sorted(users.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
-    msg = "🏆 Топ 10 игроков:\n"
-    for i, (name, data) in enumerate(top_users, start=1):
-        msg += f"{i}. {name} — {data['balance']} монет\n"
-    return text_response(msg.strip())
+    data = load_balances()
+    top10 = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
+    lines = [f"{i+1}. {name} — {info['balance']} монет" for i, (name, info) in enumerate(top10)]
+    return text_response("🏆 Топ 10 игроков:\n" + "\n".join(lines))
+
+@app.route("/stats")
+def stats():
+    user = request.args.get("user")
+    if not user:
+        return text_response("⚠ Укажите имя: !stats")
+
+    data = load_balances()
+    user = user.lower()
+    if user not in data:
+        get_balance(user)
+        data = load_balances()
+
+    wins = data[user]["wins"]
+    losses = data[user]["losses"]
+    total = wins + losses
+    winrate = (wins / total * 100) if total > 0 else 0
+    return text_response(f"📊 Статистика {user}:\n✅ Побед: {wins}\n❌ Поражений: {losses}\n📈 Винрейт: {winrate:.1f}%")
 
 @app.route("/admin")
 def admin():
-    user = request.args.get("user", "").strip().lower()
-    target = request.args.get("target", "").strip()
-    action = request.args.get("action", "").lower()
-    amount = request.args.get("amount", "").strip()
+    user = request.args.get("user")
+    target = request.args.get("target")
+    action = request.args.get("action")
+    amount = request.args.get("amount")
 
-    if user not in [a.lower() for a in ADMINS]:
-        return text_response("🚫 У тебя нет прав использовать эту команду!")
+    if user.lower() not in [a.lower() for a in ADMINS]:
+        return text_response("⛔ У вас нет прав администратора!")
 
-    if not target or not action or not amount:
-        return text_response("❌ Использование: !admin <ник> <add/remove> <сумма>")
+    if not (target and action and amount):
+        return text_response("⚙ Использование: !admin <ник> <add|remove> <сумма>")
 
     try:
         amount = int(amount)
     except ValueError:
         return text_response("❌ Сумма должна быть числом!")
 
-    data = get_user(target)
-
     if action == "add":
-        data["balance"] += amount
-        msg = f"✅ {user} добавил {amount} монет игроку {target}. Баланс: {data['balance']}"
+        update_balance(target, amount)
+        return text_response(f"✅ {user} добавил {amount} монет игроку {target}. Баланс: {get_balance(target)}")
     elif action == "remove":
-        data["balance"] = max(0, data["balance"] - amount)
-        msg = f"⚠️ {user} забрал {amount} монет у {target}. Баланс: {data['balance']}"
+        update_balance(target, -amount)
+        return text_response(f"⚠️ {user} забрал {amount} монет у {target}. Баланс: {get_balance(target)}")
     else:
-        return text_response("❌ Действие должно быть 'add' или 'remove'.")
+        return text_response("⚙ Неверное действие! Используй add или remove.")
 
-    save_data()
-    return text_response(msg)
-
+# ====== СТАРТ ======
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(host="0.0.0.0", port=10000)
