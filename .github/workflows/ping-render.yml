@@ -1,0 +1,15 @@
+name: Keep Render Alive 💡
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # каждые 5 минут
+  workflow_dispatch:         # можно запустить вручную из вкладки Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render server
+        run: |
+          echo "Pinging Render..."
+          curl -fsS --max-time 10 "https://kazikbotwitch228.onrender.com/" || echo "Ping failed"
