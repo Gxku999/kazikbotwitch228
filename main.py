@@ -1,160 +1,139 @@
-from flask import Flask, request, Response
-import json, os, random, time, base64, requests
+from flask import Flask, request
+import json, os, random, time, threading
 
 app = Flask(__name__)
 
-BONUS_INTERVAL = 900  # 15 минут
+BALANCES_FILE = "balances.json"
+BONUS_INTERVAL = 900  # 15 минут (в секундах)
 BONUS_AMOUNT = 500
-START_BALANCE = 1500
+DEFAULT_BALANCE = 1500
 
-# === GitHub Config ===
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")
-GITHUB_FILE = os.getenv("GITHUB_FILE", "balances.json")
+balances = {}
+last_bonus_time = {}
 
-HEADERS = {
-    "Authorization": f"token {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github.v3+json",
-}
+# === Работа с балансами ===
 
-def github_api(path):
-    return f"https://api.github.com/repos/{GITHUB_REPO}/{path}"
-
-# === JSON Response с нормальной кодировкой ===
-def text_response(msg):
-    return Response(json.dumps({"message": msg}, ensure_ascii=False),
-                    mimetype="application/json; charset=utf-8")
-
-# === Работа с GitHub ===
 def load_balances():
-    try:
-        r = requests.get(github_api(f"contents/{GITHUB_FILE}"), headers=HEADERS)
-        if r.status_code == 200:
-            content = base64.b64decode(r.json()["content"]).decode("utf-8")
-            return json.loads(content), r.json()["sha"]
-        else:
-            print("GitHub load:", r.text)
-            return {}, None
-    except Exception as e:
-        print("Ошибка load_balances:", e)
-        return {}, None
+    global balances
+    if os.path.exists(BALANCES_FILE):
+        with open(BALANCES_FILE, "r", encoding="utf-8") as f:
+            try:
+                balances = json.load(f)
+            except json.JSONDecodeError:
+                balances = {}
+    else:
+        balances = {}
 
-def save_balances(data, sha=None):
-    try:
-        message = "update balances"
-        content = base64.b64encode(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")).decode("utf-8")
-        payload = {"message": message, "content": content}
-        if sha:
-            payload["sha"] = sha
-        r = requests.put(github_api(f"contents/{GITHUB_FILE}"), headers=HEADERS, json=payload)
-        if r.status_code not in [200, 201]:
-            print("GitHub save error:", r.text)
-    except Exception as e:
-        print("Ошибка save_balances:", e)
+def save_balances():
+    tmp = BALANCES_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(balances, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, BALANCES_FILE)
 
-# === Балансы ===
-def get_balance(user):
-    data, sha = load_balances()
-    user = user.lower()
-    if user not in data:
-        data[user] = {"balance": START_BALANCE, "last_bonus": 0}
-        save_balances(data, sha)
-    return data[user]["balance"], sha
+load_balances()
 
-def set_balance(user, new_balance, sha=None):
-    data, sha2 = load_balances()
-    if not sha:
-        sha = sha2
-    user = user.lower()
-    if user not in data:
-        data[user] = {"balance": START_BALANCE, "last_bonus": 0}
-    data[user]["balance"] = max(0, int(new_balance))
-    save_balances(data, sha)
+# === Команды ===
 
-# === Проверка бонуса ===
-def check_bonus(user):
-    data, sha = load_balances()
-    user = user.lower()
+@app.route("/balance")
+def balance():
+    user = request.args.get("user", "").lower()
+    if not user:
+        return "❌ Укажи имя пользователя."
+
+    balance = balances.get(user, DEFAULT_BALANCE)
+    balances[user] = balance
+    save_balances()
+
+    return f"💰 Баланс {user}: {balance} монет"
+
+@app.route("/bonus")
+def bonus():
+    user = request.args.get("user", "").lower()
     now = time.time()
-    if user not in data:
-        data[user] = {"balance": START_BALANCE, "last_bonus": now}
-    if now - data[user]["last_bonus"] >= BONUS_INTERVAL:
-        data[user]["balance"] += BONUS_AMOUNT
-        data[user]["last_bonus"] = now
-        save_balances(data, sha)
-        return f"⏱ {user} получает {BONUS_AMOUNT} монет за активность на стриме! 🎁"
-    return None
 
-# === Рулетка ===
+    if not user:
+        return "❌ Укажи имя пользователя."
+
+    last_time = last_bonus_time.get(user, 0)
+    if now - last_time < BONUS_INTERVAL:
+        mins = int((BONUS_INTERVAL - (now - last_time)) / 60)
+        return f"⏳ {user}, бонус можно получить через {mins} мин."
+
+    balances[user] = balances.get(user, DEFAULT_BALANCE) + BONUS_AMOUNT
+    last_bonus_time[user] = now
+    save_balances()
+
+    return f"🎁 {user} получает {BONUS_AMOUNT} монет за активность! Баланс: {balances[user]}"
+
 @app.route("/roll")
 def roll():
     user = request.args.get("user", "").lower()
     color = request.args.get("color", "").lower()
-    bet = request.args.get("bet", "0")
+    bet = request.args.get("bet", "")
 
-    emojis = {"red": "🟥", "black": "⬛", "green": "🟩"}
-    multipliers = {"red": 2, "black": 2, "green": 14}
+    if not user or not color or not bet:
+        return "❌ Формат: !roll <red|black|green> <ставка>"
 
-    if color not in emojis:
-        return text_response("❌ Укажи цвет: red, black или green.")
     try:
         bet = int(bet)
-    except:
-        return text_response("❌ Ставка должна быть числом.")
+    except ValueError:
+        return "❌ Ставка должна быть числом!"
+
+    balance = balances.get(user, DEFAULT_BALANCE)
     if bet <= 0:
-        return text_response("❌ Ставка должна быть больше нуля.")
-
-    balance, sha = get_balance(user)
+        return "❌ Ставка должна быть больше 0!"
     if bet > balance:
-        return text_response(f"💸 Недостаточно средств! Баланс: {balance}")
+        return f"❌ Недостаточно монет! Баланс: {balance}"
 
-    outcome = random.choices(["red", "black", "green"], weights=[47, 47, 6])[0]
+    result = random.choice(["red", "black", "green"])
+    color_emoji = {"red": "🟥", "black": "⬛", "green": "🟩"}
 
-    if outcome == color:
-        win = bet * (multipliers[color] - 1)
-        new_balance = balance + win
-        result = f"✅ Победа! +{win} | Баланс: {new_balance}"
+    if result == color:
+        multiplier = 14 if result == "green" else 2
+        win = bet * (multiplier - 1)
+        balance += win
+        outcome = f"✅ Победа! | +{win}"
     else:
-        new_balance = balance - bet
-        result = f"❌ Проигрыш | Баланс: {new_balance}"
+        balance -= bet
+        outcome = f"❌ Проигрыш | -{bet}"
 
-    set_balance(user, new_balance, sha)
-    msg = f"🎰 {user} ставит {bet} на {emojis[color]}! Выпало {emojis[outcome]} — {result}"
-    return text_response(msg)
+    balances[user] = balance
+    save_balances()
 
-# === Баланс ===
-@app.route("/balance")
-def balance():
-    user = request.args.get("user", "").lower()
-    bonus_msg = check_bonus(user)
-    balance, _ = get_balance(user)
-    msg = f"💰 Баланс {user}: {balance} монет"
-    if bonus_msg:
-        msg += f"\n{bonus_msg}"
-    return text_response(msg)
+    return f"🎰 {user} ставит {bet} на {color_emoji.get(color,'❓')}! Выпало {color_emoji[result]} — {outcome} | Баланс: {balance}"
 
-# === Топ 10 ===
 @app.route("/top")
 def top():
-    data, _ = load_balances()
-    top_users = sorted(data.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
-    msg = "🏆 Топ 10 игроков:\n"
-    for i, (user, info) in enumerate(top_users, 1):
-        msg += f"{i}. {user} — {info['balance']} монет\n"
-    return text_response(msg)
+    if not balances:
+        return "🏆 Пока нет игроков."
 
-# === Ручной бонус ===
-@app.route("/bonus")
-def bonus():
+    sorted_bal = sorted(balances.items(), key=lambda x: x[1], reverse=True)[:10]
+    lines = [f"{i+1}. {u}: {b} монет" for i, (u, b) in enumerate(sorted_bal)]
+    return "🏆 Топ 10 игроков:\n" + "\n".join(lines)
+
+@app.route("/stats")
+def stats():
     user = request.args.get("user", "").lower()
-    msg = check_bonus(user)
-    if not msg:
-        msg = f"⏳ {user}, бонус уже получен недавно!"
-    return text_response(msg)
+    if not user:
+        return "❌ Укажи имя пользователя."
+    bal = balances.get(user, DEFAULT_BALANCE)
+    return f"📊 Статистика {user}:\n💰 Баланс: {bal}"
 
+# === Автобонус ===
+def auto_bonus():
+    while True:
+        for user in list(balances.keys()):
+            balances[user] += BONUS_AMOUNT
+        save_balances()
+        print(f"[AUTO BONUS] всем игрокам выдано +{BONUS_AMOUNT}")
+        time.sleep(BONUS_INTERVAL)
+
+threading.Thread(target=auto_bonus, daemon=True).start()
+
+# === Запуск ===
 @app.route("/")
-def home():
-    return "✅ Twitch Casino Bot успешно работает и синхронизируется с GitHub!"
+def index():
+    return "✅ Twitch Casino Bot работает!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
