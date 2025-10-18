@@ -10,13 +10,13 @@
     }
   },
   "kiykva": {
-    "balance": 13500,
+    "balance": 12300,
     "last_bonus": 0,
     "stats": {
       "wins": 3,
-      "losses": 2,
+      "losses": 3,
       "earned": 3222,
-      "lost": 1222
+      "lost": 2422
     }
   },
   "klykva": {
