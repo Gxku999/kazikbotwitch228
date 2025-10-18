@@ -40,13 +40,13 @@
     }
   },
   "freak_soul_": {
-    "balance": 1478,
+    "balance": 1456,
     "last_bonus": 0,
     "stats": {
       "wins": 0,
-      "losses": 1,
+      "losses": 2,
       "earned": 0,
-      "lost": 22
+      "lost": 44
     }
   }
 }
