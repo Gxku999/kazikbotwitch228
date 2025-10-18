@@ -8,5 +8,15 @@
       "earned": 0,
       "lost": 12500
     }
+  },
+  "kiykva": {
+    "balance": 1500,
+    "last_bonus": 0,
+    "stats": {
+      "wins": 0,
+      "losses": 0,
+      "earned": 0,
+      "lost": 0
+    }
   }
 }
