@@ -30,12 +30,12 @@
     }
   },
   "traxxxie52": {
-    "balance": 1500,
+    "balance": 1503,
     "last_bonus": 0,
     "stats": {
-      "wins": 0,
+      "wins": 1,
       "losses": 0,
-      "earned": 0,
+      "earned": 3,
       "lost": 0
     }
   }
