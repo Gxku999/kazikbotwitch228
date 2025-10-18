@@ -17,7 +17,8 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 GITHUB_USER = os.getenv("GITHUB_USER")
 
-ADMINS = ["gxku999"]  # 👑 Только эти пользователи могут выдавать/забирать баланс
+ADMINS = ["gxku999", "Gxku999"]  # можно добавить все варианты регистра
+
 
 LAST_PUSH = 0
 PUSH_INTERVAL = 300  # 5 минут
@@ -192,8 +193,9 @@ def add_coin():
     user = request.args.get("user", "").strip().lower()
     amount_str = request.args.get("amount", "").strip()
 
-    if admin not in ADMINS:
-        return text_response("⛔ У тебя нет прав для выдачи монет.")
+    # Проверка админа (без учёта регистра)
+    if admin not in [a.lower() for a in ADMINS]:
+        return text_response(f"⛔ {admin} не имеет прав для выдачи монет.")
 
     if not user or not amount_str:
         return text_response("❌ Формат: /addcoin?admin=твойник&user=ник&amount=1000")
@@ -219,8 +221,9 @@ def remove_coin():
     user = request.args.get("user", "").strip().lower()
     amount_str = request.args.get("amount", "").strip()
 
-    if admin not in ADMINS:
-        return text_response("⛔ У тебя нет прав для изъятия монет.")
+    # Проверка админа (без учёта регистра)
+    if admin not in [a.lower() for a in ADMINS]:
+        return text_response(f"⛔ {admin} не имеет прав для изъятия монет.")
 
     if not user or not amount_str:
         return text_response("❌ Формат: /removecoin?admin=твойник&user=ник&amount=500")
@@ -238,6 +241,7 @@ def remove_coin():
     save_balances()
 
     return text_response(f"💸 {admin} изъял {amount} монет у {user}. Баланс: {balances[u]['balance']}")
+
 
 
 @app.route("/resetall")
@@ -258,6 +262,7 @@ def reset_all():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
 
