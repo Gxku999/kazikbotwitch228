@@ -189,16 +189,11 @@ def stats():
 
 @app.route("/addcoin")
 def add_coin():
-    admin = request.args.get("admin", "").strip().lower()
-    user = request.args.get("user", "").strip().lower()
-    amount_str = request.args.get("amount", "").strip()
-
-    # Проверка админа (без учёта регистра)
-    if admin not in [a.lower() for a in ADMINS]:
-        return text_response(f"⛔ {admin} не имеет прав для выдачи монет.")
+    user = request.args.get("user", "").strip().lower()   # кому выдаём
+    amount_str = request.args.get("amount", "").strip()   # сколько выдаём
 
     if not user or not amount_str:
-        return text_response("❌ Формат: /addcoin?admin=твойник&user=ник&amount=1000")
+        return text_response("❌ Формат: /addcoin?user=ник&amount=1000")
 
     try:
         amount = int(amount_str)
@@ -212,21 +207,17 @@ def add_coin():
     balances[u]["balance"] += amount
     save_balances()
 
-    return text_response(f"💰 {admin} выдал {amount} монет пользователю {user}. Баланс: {balances[u]['balance']}")
+    return text_response(f"💰 Пользователь {user} получил {amount} монет. Баланс: {balances[u]['balance']}")
+
 
 
 @app.route("/removecoin")
 def remove_coin():
-    admin = request.args.get("admin", "").strip().lower()
-    user = request.args.get("user", "").strip().lower()
-    amount_str = request.args.get("amount", "").strip()
-
-    # Проверка админа (без учёта регистра)
-    if admin not in [a.lower() for a in ADMINS]:
-        return text_response(f"⛔ {admin} не имеет прав для изъятия монет.")
+    user = request.args.get("user", "").strip().lower()   # у кого забираем
+    amount_str = request.args.get("amount", "").strip()   # сколько забираем
 
     if not user or not amount_str:
-        return text_response("❌ Формат: /removecoin?admin=твойник&user=ник&amount=500")
+        return text_response("❌ Формат: /removecoin?user=ник&amount=100")
 
     try:
         amount = int(amount_str)
@@ -237,10 +228,16 @@ def remove_coin():
         return text_response("❌ Количество должно быть положительным.")
 
     u = ensure_user(user)
-    balances[u]["balance"] = max(0, balances[u]["balance"] - amount)
+    if balances[u]["balance"] < amount:
+        balances[u]["balance"] = 0
+        save_balances()
+        return text_response(f"⚠️ У {user} не хватает монет. Баланс сброшен до 0.")
+
+    balances[u]["balance"] -= amount
     save_balances()
 
-    return text_response(f"💸 {admin} изъял {amount} монет у {user}. Баланс: {balances[u]['balance']}")
+    return text_response(f"💸 У пользователя {user} изъято {amount} монет. Баланс: {balances[u]['balance']}")
+
 
 
 
@@ -262,6 +259,7 @@ def reset_all():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
 
