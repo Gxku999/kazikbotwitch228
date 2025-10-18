@@ -187,48 +187,58 @@ def stats():
     )
 
 @app.route("/addcoin")
-def addcoin():
+def add_coin():
     admin = request.args.get("admin", "").strip().lower()
     user = request.args.get("user", "").strip().lower()
-    amount = request.args.get("amount", "").strip()
+    amount_str = request.args.get("amount", "").strip()
 
-    if not is_admin(admin):
-        return text_response("⛔ У тебя нет прав для этой команды!")
+    if admin not in ADMINS:
+        return text_response("⛔ У тебя нет прав для выдачи монет.")
 
-    if not user or not amount:
-        return text_response("❌ Формат: /addcoin?admin=ник&user=ник&amount=100")
+    if not user or not amount_str:
+        return text_response("❌ Формат: /addcoin?admin=твойник&user=ник&amount=1000")
 
     try:
-        amt = int(amount)
+        amount = int(amount_str)
     except:
-        return text_response("❌ Сумма должна быть числом")
+        return text_response("❌ Количество должно быть числом.")
+
+    if amount <= 0:
+        return text_response("❌ Количество должно быть положительным.")
 
     u = ensure_user(user)
-    balances[u]["balance"] += amt
+    balances[u]["balance"] += amount
     save_balances()
-    return text_response(f"💸 {admin} выдал {amt} монет игроку {user}. Баланс: {balances[u]['balance']}")
+
+    return text_response(f"💰 {admin} выдал {amount} монет пользователю {user}. Баланс: {balances[u]['balance']}")
+
 
 @app.route("/removecoin")
-def removecoin():
+def remove_coin():
     admin = request.args.get("admin", "").strip().lower()
     user = request.args.get("user", "").strip().lower()
-    amount = request.args.get("amount", "").strip()
+    amount_str = request.args.get("amount", "").strip()
 
-    if not is_admin(admin):
-        return text_response("⛔ У тебя нет прав для этой команды!")
+    if admin not in ADMINS:
+        return text_response("⛔ У тебя нет прав для изъятия монет.")
 
-    if not user or not amount:
-        return text_response("❌ Формат: /removecoin?admin=ник&user=ник&amount=100")
+    if not user or not amount_str:
+        return text_response("❌ Формат: /removecoin?admin=твойник&user=ник&amount=500")
 
     try:
-        amt = int(amount)
+        amount = int(amount_str)
     except:
-        return text_response("❌ Сумма должна быть числом")
+        return text_response("❌ Количество должно быть числом.")
+
+    if amount <= 0:
+        return text_response("❌ Количество должно быть положительным.")
 
     u = ensure_user(user)
-    balances[u]["balance"] = max(0, balances[u]["balance"] - amt)
+    balances[u]["balance"] = max(0, balances[u]["balance"] - amount)
     save_balances()
-    return text_response(f"💀 {admin} изъял {amt} монет у {user}. Баланс: {balances[u]['balance']}")
+
+    return text_response(f"💸 {admin} изъял {amount} монет у {user}. Баланс: {balances[u]['balance']}")
+
 
 @app.route("/resetall")
 def reset_all():
@@ -248,5 +258,6 @@ def reset_all():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
