@@ -1,11 +1,11 @@
 {
   "gxku999": {
-    "balance": 10000000,
+    "balance": 10005000,
     "last_bonus": 1761028046.8495421,
     "stats": {
-      "wins": 10,
+      "wins": 11,
       "losses": 23,
-      "earned": 308510,
+      "earned": 313510,
       "lost": 432020
     }
   },
