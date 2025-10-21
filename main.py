@@ -4,6 +4,7 @@ import time
 import os
 import subprocess
 from flask import Flask, request, Response
+from filelock import FileLock  # 🔒 для защиты от одновременной записи
 
 app = Flask(__name__)
 
@@ -17,8 +18,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 GITHUB_USER = os.getenv("GITHUB_USER")
 
-ADMINS = ["gxku999", "Gxku999"]  # можно добавить все варианты регистра
-
+ADMINS = ["gxku999", "Gxku999"]
 
 LAST_PUSH = 0
 PUSH_INTERVAL = 300  # 5 минут
@@ -32,22 +32,29 @@ def text_response(message):
 
 # === Работа с файлами ===
 def load_balances():
-    if os.path.exists(LOCAL_FILE):
+    """Безопасно загружает balances.json"""
+    if not os.path.exists(LOCAL_FILE):
+        return {}
+    lock = FileLock(f"{LOCAL_FILE}.lock")
+    with lock:
         try:
             with open(LOCAL_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             log(f"⚠ Ошибка чтения {LOCAL_FILE}: {e}")
-    return {}
+            return {}
 
 def save_balances():
-    try:
-        with open(LOCAL_FILE, "w", encoding="utf-8") as f:
-            json.dump(balances, f, ensure_ascii=False, indent=2)
-        log(f"💾 balances.json сохранён локально.")
-        push_to_github()
-    except Exception as e:
-        log(f"⚠ Ошибка при сохранении: {e}")
+    """Безопасно сохраняет balances.json"""
+    lock = FileLock(f"{LOCAL_FILE}.lock")
+    with lock:
+        try:
+            with open(LOCAL_FILE, "w", encoding="utf-8") as f:
+                json.dump(balances, f, ensure_ascii=False, indent=2)
+            log("💾 balances.json сохранён локально.")
+            push_to_github()
+        except Exception as e:
+            log(f"⚠ Ошибка при сохранении: {e}")
 
 def push_to_github():
     if not (GITHUB_TOKEN and GITHUB_REPO and GITHUB_USER):
@@ -70,6 +77,9 @@ log("✅ Бот запущен, баланс загружен.")
 
 # === Вспомогательные ===
 def ensure_user(user):
+    """Гарантирует, что игрок есть в базе, иначе создаёт запись"""
+    global balances
+    balances = load_balances()  # 🔄 Обновляем данные из файла перед изменением
     user = user.lower()
     if user not in balances:
         balances[user] = {
@@ -90,6 +100,8 @@ def home():
 
 @app.route("/balance")
 def balance():
+    global balances
+    balances = load_balances()
     user = request.args.get("user", "").strip().lower()
     if not user:
         return text_response("❌ Укажи имя пользователя (?user=...)")
@@ -99,6 +111,8 @@ def balance():
 
 @app.route("/roll")
 def roll():
+    global balances
+    balances = load_balances()
     user = request.args.get("user", "").strip().lower()
     color = request.args.get("color", "").strip().lower()
     bet_str = request.args.get("bet", "").strip()
@@ -142,6 +156,8 @@ def roll():
 
 @app.route("/bonus")
 def bonus():
+    global balances
+    balances = load_balances()
     user = request.args.get("user", "").strip().lower()
     if not user:
         return text_response("❌ Укажи имя пользователя (?user=...)")
@@ -162,6 +178,8 @@ def bonus():
 
 @app.route("/top")
 def top():
+    global balances
+    balances = load_balances()
     if not balances:
         return text_response("🏆 Пока нет игроков")
     sorted_users = sorted(balances.items(), key=lambda x: x[1]["balance"], reverse=True)
@@ -170,6 +188,8 @@ def top():
 
 @app.route("/stats")
 def stats():
+    global balances
+    balances = load_balances()
     user = request.args.get("user", "").strip().lower()
     if not user:
         return text_response("❌ Укажи имя (?user=...)")
@@ -189,8 +209,10 @@ def stats():
 
 @app.route("/addcoin")
 def add_coin():
-    user = request.args.get("user", "").strip().lower()   # кому выдаём
-    amount_str = request.args.get("amount", "").strip()   # сколько выдаём
+    global balances
+    balances = load_balances()
+    user = request.args.get("user", "").strip().lower()
+    amount_str = request.args.get("amount", "").strip()
 
     if not user or not amount_str:
         return text_response("❌ Формат: /addcoin?user=ник&amount=1000")
@@ -206,15 +228,14 @@ def add_coin():
     u = ensure_user(user)
     balances[u]["balance"] += amount
     save_balances()
-
     return text_response(f"💰 Пользователь {user} получил {amount} монет. Баланс: {balances[u]['balance']}")
-
-
 
 @app.route("/removecoin")
 def remove_coin():
-    user = request.args.get("user", "").strip().lower()   # у кого забираем
-    amount_str = request.args.get("amount", "").strip()   # сколько забираем
+    global balances
+    balances = load_balances()
+    user = request.args.get("user", "").strip().lower()
+    amount_str = request.args.get("amount", "").strip()
 
     if not user or not amount_str:
         return text_response("❌ Формат: /removecoin?user=ник&amount=100")
@@ -235,32 +256,17 @@ def remove_coin():
 
     balances[u]["balance"] -= amount
     save_balances()
-
     return text_response(f"💸 У пользователя {user} изъято {amount} монет. Баланс: {balances[u]['balance']}")
-
-
-
 
 @app.route("/resetall")
 def reset_all():
     admin = request.args.get("admin", "").strip().lower()
-
     if admin not in ADMINS:
         return text_response("⛔ У тебя нет прав для глобального сброса.")
-
     global balances
     balances = {}
-
-    # Можно создать пустой balances.json с сохранением
     save_balances()
-
     return text_response(f"🧹 Все игроки и их статистика полностью сброшены админом {admin}.")
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
-
-
-
