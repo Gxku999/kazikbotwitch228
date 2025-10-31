@@ -50,12 +50,12 @@
     }
   },
   "00matrix00": {
-    "balance": 100500,
+    "balance": 101800,
     "last_bonus": 0,
     "stats": {
-      "wins": 0,
+      "wins": 1,
       "losses": 1,
-      "earned": 0,
+      "earned": 1300,
       "lost": 1000
     }
   }
