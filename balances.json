@@ -48,5 +48,15 @@
       "earned": 0,
       "lost": 44
     }
+  },
+  "00matrix00": {
+    "balance": 500,
+    "last_bonus": 0,
+    "stats": {
+      "wins": 0,
+      "losses": 1,
+      "earned": 0,
+      "lost": 1000
+    }
   }
 }
