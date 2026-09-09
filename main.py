@@ -103,7 +103,7 @@ def roll():
     try:
         bet = int(bet_str)
     except:
-        return text_response("❌ Ставка должна быть числом")
+        return text_response("❌ Ставка должна быть числом введите комманду !roll [цвет] [число]")
 
     if bet <= 0:
         return text_response("❌ Минимальная ставка — 1 монета")
