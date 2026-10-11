@@ -10,8 +10,8 @@ app = Flask(__name__)
 
 # === Настройки ===
 LOCAL_FILE = "balances.json"
-DEFAULT_BALANCE = 1500
-BONUS_AMOUNT = 500
+DEFAULT_BALANCE = 15000
+BONUS_AMOUNT = 5000
 BONUS_INTERVAL = 15 * 60  # 15 минут
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
