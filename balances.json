@@ -10,12 +10,12 @@
     }
   },
   "herresvoid": {
-    "balance": 4990,
+    "balance": 9980,
     "last_bonus": 1792081092.8269053,
     "stats": {
-      "wins": 0,
+      "wins": 1,
       "losses": 2,
-      "earned": 0,
+      "earned": 4990,
       "lost": 15010
     }
   }
