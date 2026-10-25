@@ -18,5 +18,15 @@
       "earned": 14970,
       "lost": 15010
     }
+  },
+  "whorasich_": {
+    "balance": 15001,
+    "last_bonus": 0,
+    "stats": {
+      "wins": 1,
+      "losses": 0,
+      "earned": 1,
+      "lost": 0
+    }
   }
 }
